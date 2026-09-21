@@ -80,8 +80,11 @@ bus a plugin would, and the mock source toggle mounts a deterministic random sou
 
 ## Deploy
 
-The repo is Vercel-ready: `vercel.json` builds `apps/web` with `pnpm build:web` and serves
-`apps/web/dist`. Import the repository in the Vercel dashboard and deploy with the defaults.
+The repo is Vercel-ready. Import the repository in the Vercel dashboard and deploy with the
+defaults: the root `vercel.json` builds `apps/web` with `pnpm build:web` and serves
+`apps/web/dist`. If the project's Root Directory is set to `apps/web` instead, the
+`apps/web/vercel.json` next to the app runs the same build and serves `dist`; both entry
+points work because `build:web` is defined in the root and in `apps/web/package.json`.
 
 ## Develop
 
