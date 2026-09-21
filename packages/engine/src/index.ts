@@ -1,14 +1,13 @@
 /**
  * @ambient/engine
  *
- * Phase 2: SignalToUniformMapper (target vs. current state, frame-rate independent damping,
- *          pulse ring buffer). Subscribes to a DataSignalBus; never touches WebGL.
- * Phase 3: WebGL2 fullscreen-quad canvas controller that loads a ShaderManifest and
- *          pushes the mapper's uniform state each frame.
+ * Phase 2 (this): SignalToUniformMapper turns bus signals into damped uniform state.
+ * Phase 3: a WebGL2 fullscreen-quad canvas controller that loads a ShaderManifest and pushes
+ *          the mapper's snapshot each frame.
  */
-import type { StandardUniform } from '@ambient/sdk';
+export const ENGINE_VERSION = '0.1.0' as const;
 
-export const ENGINE_VERSION = '0.0.0' as const;
-
-/** The uniform state the mapper will own. Declared now so Phase 2 has a target shape. */
-export type UniformState = Readonly<Record<StandardUniform, number | readonly number[]>>;
+export { expDamp, expDampAngle } from './damp.js';
+export { type FrameCallback, FrameLoop, type FrameLoopOptions } from './frame-loop.js';
+export { type MapperOptions, SignalToUniformMapper, type UniformState } from './mapper.js';
+export { type LivePulse, PulseBuffer, type PulseBufferOptions } from './pulse-buffer.js';

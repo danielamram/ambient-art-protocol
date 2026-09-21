@@ -1,6 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist", "composite": true },
-  "include": ["src"],
-  "references": [{ "path": "../sdk" }]
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "composite": true
+  },
+  "include": ["src", "test", "examples"],
+  "references": [
+    {
+      "path": "../sdk"
+    }
+  ]
 }

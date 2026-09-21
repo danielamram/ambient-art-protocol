@@ -17,6 +17,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "dev": "tsx packages/sdk/examples/demo.ts",
+    "dev:engine": "tsx packages/engine/examples/demo.ts",
     "clean": "pnpm -r run clean",
     "check": "pnpm typecheck && pnpm lint && pnpm test"
   },
