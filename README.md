@@ -6,8 +6,9 @@ Plug in a data source (a webhook, a WebSocket feed, a polling API), have it emit
 signals, and watch a fragment shader breathe with it. Sources know nothing about shaders. Shaders
 know nothing about sources. A small, versioned JSON protocol sits in between.
 
-**Status: Phase 1.** The SDK, signal bus, and plugin API are implemented and tested. The renderer,
-built-in shaders, built-in sources, and web app are stubs. See the roadmap in `CLAUDE.md`.
+**Status: early, but it renders.** The SDK, signal bus, plugin API, uniform mapper, a WebGL2
+renderer, one shader theme, and a web app with a control overlay are implemented and tested.
+Built-in sources and more themes are next. See the roadmap in `CLAUDE.md`.
 
 ## The protocol
 
@@ -67,14 +68,30 @@ bus.latest('ambiance').subscribe(updatePalette);   // replays the current state 
 await registry.dispose();
 ```
 
+## Try it
+
+```
+pnpm install
+pnpm dev:web   # http://localhost:5173
+```
+
+Tap the canvas to send a pulse. The sliders emit `ambiance` and `current` signals onto the same
+bus a plugin would, and the mock source toggle mounts a deterministic random source.
+
+## Deploy
+
+The repo is Vercel-ready: `vercel.json` builds `apps/web` with `pnpm build:web` and serves
+`apps/web/dist`. Import the repository in the Vercel dashboard and deploy with the defaults.
+
 ## Develop
 
 Requires Node 20+ and pnpm 10.
 
 ```
 pnpm install
-pnpm check     # typecheck + lint + test
-pnpm dev       # watch a mock source stream signals through the bus
+pnpm check       # typecheck + lint + test
+pnpm dev         # watch a mock source stream signals through the bus
+pnpm dev:engine  # same, through the mapper: targets vs damped values
 ```
 
 Packages:

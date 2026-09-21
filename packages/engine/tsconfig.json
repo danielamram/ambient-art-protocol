@@ -3,12 +3,9 @@
   "compilerOptions": {
     "rootDir": ".",
     "outDir": "dist",
-    "composite": true
+    "composite": true,
+    "lib": ["ES2022", "DOM"]
   },
   "include": ["src", "test", "examples"],
-  "references": [
-    {
-      "path": "../sdk"
-    }
-  ]
+  "references": [{ "path": "../sdk" }]
 }

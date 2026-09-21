@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@ambient/sdk": ["../../packages/sdk/src/index.ts"],
+      "@ambient/sdk/testing": ["../../packages/sdk/src/testing/index.ts"],
+      "@ambient/engine": ["../../packages/engine/src/index.ts"],
+      "@ambient/shaders": ["../../packages/shaders/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

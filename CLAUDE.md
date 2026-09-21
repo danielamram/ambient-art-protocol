@@ -24,12 +24,15 @@ Read `docs/brainstorm.md` for the design critique and the reasoning behind the d
 - `packages/sdk` (`@ambient/sdk`): protocol types, `DataSignalBus`, `createSource()`,
   `SourceRegistry`, `SignalTransport`, `ShaderManifest`. Isomorphic: no DOM, no Node-only APIs.
   `@ambient/sdk/testing` ships `createMockSource` and `collect`.
-- `packages/engine` (`@ambient/engine`): `SignalToUniformMapper`, `PulseBuffer`, `FrameLoop` (done),
-  and the WebGL2 fullscreen-quad canvas controller (**Phase 3, not yet**). Isomorphic: no DOM types.
+- `packages/engine` (`@ambient/engine`): `SignalToUniformMapper`, `PulseBuffer`, `FrameLoop`, and
+  `CanvasRenderer` (WebGL2 fullscreen triangle, loads a `ShaderManifest`). The mapper and loop
+  are isomorphic; only `renderer.ts` touches the DOM.
 - `packages/sources` (`@ambient/sources`): built-in source plugins. **Phase 4, stub today.**
-- `packages/shaders` (`@ambient/shaders`): GLSL themes as `ShaderManifest` objects.
-  **Phase 3, stub today.**
-- `apps/web`: Vite + React canvas and dev overlay. **Phase 5, stub today.**
+- `packages/shaders` (`@ambient/shaders`): GLSL ES 3.00 themes as `ShaderManifest` objects.
+  Shipped: `aurora-drift`. Planned: `cybernetic-mesh`, `fluid-field`.
+- `apps/web`: Vite + React full-screen canvas with a floating overlay (theme picker, sliders that
+  emit onto the bus, tap-to-pulse, mock source toggle, live readout). Deployed to Vercel from
+  `vercel.json` at the root.
 
 ## Code Conventions
 - Strict TypeScript, ESM only, `module: NodeNext`. Relative imports use the `.js` extension.
@@ -53,6 +56,8 @@ pnpm lint         # biome check
 pnpm test         # vitest run
 pnpm dev          # tsx demo: mock source -> bus -> stdout, exits after 3s
 pnpm dev:engine   # tsx demo: mock source -> bus -> mapper -> uniform snapshots, exits after 3s
+pnpm dev:web      # vite dev server for apps/web
+pnpm build:web    # production bundle to apps/web/dist (what Vercel runs)
 pnpm check        # typecheck + lint + test
 ```
 
@@ -60,7 +65,9 @@ pnpm check        # typecheck + lint + test
 - Phase 1 (done): workspace, `@ambient/sdk`, tests, demo.
 - Phase 2 (done): `SignalToUniformMapper`, `PulseBuffer` (ring of 8), `FrameLoop` in `engine`.
   Targets are written by bus subscriptions; `tick(dt)` damps current state with `expDamp`.
-- Phase 3: WebGL2 canvas controller + two themes (`cybernetic-mesh`, `fluid-field`).
+- Phase 3 (partial): `CanvasRenderer` and the `aurora-drift` theme are done. Still to do:
+  `cybernetic-mesh` (raymarched sphere) and `fluid-field` (2D fluid sim).
 - Phase 4: `mock-crypto` and `webhook-pulse` sources, plus a WebSocket relay transport so
   Node-side sources can feed a browser renderer.
-- Phase 5: `apps/web` with the floating overlay (manual sliders, theme switcher).
+- Phase 5 (initial): `apps/web` exists with the overlay. Still to do: signal scope sparklines,
+  source presets, recorder/replayer.
