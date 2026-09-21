@@ -80,6 +80,9 @@ importers:
       '@ambient/shaders':
         specifier: workspace:*
         version: link:../../packages/shaders
+      '@ambient/sources':
+        specifier: workspace:*
+        version: link:../../packages/sources
       react:
         specifier: 'catalog:'
         version: 19.3.0

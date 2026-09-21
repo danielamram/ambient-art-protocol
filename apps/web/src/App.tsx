@@ -1,7 +1,17 @@
+import type { SourceStatus } from '@ambient/sdk';
 import { useEffect, useRef, useState } from 'react';
-import { AmbientStage, type Readout } from './ambient.js';
+import { AmbientStage, type Readout, SOURCE_OPTIONS } from './ambient.js';
 
 const f = (n: number) => n.toFixed(2);
+
+const STATUS_LABEL: Record<SourceStatus, string> = {
+  idle: 'off',
+  starting: 'connecting',
+  running: 'live',
+  stopping: 'stopping',
+  stopped: 'off',
+  error: 'error',
+};
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -15,7 +25,8 @@ export function App() {
   const [cx, setCx] = useState(0.5);
   const [cy, setCy] = useState(0.5);
   const [velocity, setVelocity] = useState(0);
-  const [mock, setMock] = useState(false);
+  const [sources, setSources] = useState<Record<string, boolean>>({});
+  const [status, setStatus] = useState<Record<string, SourceStatus>>({});
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -29,6 +40,7 @@ export function App() {
     }
     stageRef.current = stage;
     stage.onReadout(setReadout);
+    stage.onSourceStatus((id, s) => setStatus((prev) => ({ ...prev, [id]: s })));
     stage.start();
     return () => {
       stage.dispose();
@@ -45,12 +57,13 @@ export function App() {
   }, [cx, cy, velocity]);
 
   useEffect(() => {
-    void stageRef.current?.setMock(mock);
-  }, [mock]);
-
-  useEffect(() => {
     stageRef.current?.setTheme(theme);
   }, [theme]);
+
+  const toggleSource = (id: string, on: boolean) => {
+    setSources((prev) => ({ ...prev, [id]: on }));
+    void stageRef.current?.setSource(id, on);
+  };
 
   const onCanvasPointer = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -79,9 +92,29 @@ export function App() {
         <header>
           <h1>Ambient Art Protocol</h1>
           <p>
-            Tap the canvas to send a pulse. Sliders emit signals onto the same bus a plugin would.
+            Tap the canvas to send a pulse. Switch on a live source, or drive the sliders yourself;
+            both emit onto the same bus.
           </p>
         </header>
+
+        <fieldset>
+          <legend>Live sources</legend>
+          {SOURCE_OPTIONS.map((opt) => {
+            const s = status[opt.id] ?? 'idle';
+            return (
+              <label key={opt.id} className="source" title={opt.description}>
+                <input
+                  id={`source-${opt.id}`}
+                  type="checkbox"
+                  checked={sources[opt.id] ?? false}
+                  onChange={(e) => toggleSource(opt.id, e.target.checked)}
+                />
+                <span className="source-name">{opt.name}</span>
+                <span className={`status status-${s}`}>{STATUS_LABEL[s]}</span>
+              </label>
+            );
+          })}
+        </fieldset>
 
         <label>
           <span>Theme</span>
@@ -107,20 +140,9 @@ export function App() {
           <Slider id="velocity" label="Velocity" value={velocity} onChange={setVelocity} />
         </fieldset>
 
-        <div className="row">
-          <button type="button" id="pulse" onClick={() => stageRef.current?.pulse(1)}>
-            Pulse
-          </button>
-          <label className="check">
-            <input
-              id="mock"
-              type="checkbox"
-              checked={mock}
-              onChange={(e) => setMock(e.target.checked)}
-            />
-            Mock source
-          </label>
-        </div>
+        <button type="button" id="pulse" onClick={() => stageRef.current?.pulse(1)}>
+          Pulse
+        </button>
 
         {readout && (
           <dl className="readout" aria-live="off">

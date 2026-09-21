@@ -189,3 +189,39 @@ input[type="range"] {
     transition: none;
   }
 }
+
+.source {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.source-name {
+  color: var(--ink);
+}
+
+.status {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.status-running {
+  color: #9ff0c1;
+  border-color: rgba(159, 240, 193, 0.5);
+}
+
+.status-starting {
+  color: var(--accent);
+  border-color: rgba(143, 211, 255, 0.5);
+}
+
+.status-error {
+  color: #ff9f9f;
+  border-color: rgba(255, 159, 159, 0.5);
+}

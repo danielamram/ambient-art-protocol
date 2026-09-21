@@ -27,6 +27,11 @@ export interface SourceContext<Config = void> {
   pulse(input: PulseInput): void;
   current(input: CurrentInput): void;
   ambiance(input: AmbianceInput): void;
+  /**
+   * Report that the source has died after starting (a dropped socket, a revoked token).
+   * Runs the teardown, aborts `signal`, and moves the source to 'error'. No-op unless running.
+   */
+  fail(error: unknown): void;
 }
 
 export interface SourceDefinition<Config = void> {
@@ -205,6 +210,18 @@ class SourceImpl<Config> implements Source {
       pulse: (input) => emit('pulse', input),
       current: (input) => emit('current', input),
       ambiance: (input) => emit('ambiance', input),
+      fail: (error) => {
+        if (this.status !== 'running' || signal.aborted) return;
+        const teardown = this.#teardown;
+        this.#fail(error);
+        if (teardown) {
+          try {
+            void teardown();
+          } catch {
+            // The source is already in 'error'; a failing teardown adds nothing.
+          }
+        }
+      },
     };
   }
 }

@@ -75,16 +75,18 @@ pnpm install
 pnpm dev:web   # http://localhost:5173
 ```
 
-Tap the canvas to send a pulse. The sliders emit `ambiance` and `current` signals onto the same
-bus a plugin would, and the mock source toggle mounts a deterministic random source.
+Switch on a live source: **Wikipedia edits** (every human edit on Wikimedia, over Server-Sent
+Events) or **BTC/USDT trades** (Binance public WebSocket). Both are free, need no key, and run in
+the browser. Tap the canvas to send a pulse by hand. The sliders emit `ambiance` and `current`
+signals onto the same bus a plugin would.
 
 ## Deploy
 
-The repo is Vercel-ready. Import the repository in the Vercel dashboard and deploy with the
-defaults: the root `vercel.json` builds `apps/web` with `pnpm build:web` and serves
-`apps/web/dist`. If the project's Root Directory is set to `apps/web` instead, the
-`apps/web/vercel.json` next to the app runs the same build and serves `dist`; both entry
-points work because `build:web` is defined in the root and in `apps/web/package.json`.
+The repo is Vercel-ready. Import the repository in the Vercel dashboard and set **Root Directory**
+to `apps/web` (keep "Include source files outside of the Root Directory" enabled, which is the
+default). `apps/web/vercel.json` installs the whole workspace, runs `pnpm -w run build:web`, and
+serves `dist`. Leaving Root Directory at the repo root also works: the root `vercel.json` does the
+same from there.
 
 ## Develop
 
