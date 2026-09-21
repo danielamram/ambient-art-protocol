@@ -1,0 +1,10 @@
+{
+  "name": "@ambient/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Vite + React live wallpaper canvas and dev overlay. Phase 5.",
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'apps/web arrives in Phase 5. Run `pnpm dev` at the repo root for the SDK demo.'"
+  }
+}
