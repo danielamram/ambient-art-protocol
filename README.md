@@ -82,8 +82,11 @@ signals onto the same bus a plugin would.
 
 ## Deploy
 
-The repo is Vercel-ready: `vercel.json` builds `apps/web` with `pnpm build:web` and serves
-`apps/web/dist`. Import the repository in the Vercel dashboard and deploy with the defaults.
+The repo is Vercel-ready. Import the repository in the Vercel dashboard and set **Root Directory**
+to `apps/web` (keep "Include source files outside of the Root Directory" enabled, which is the
+default). `apps/web/vercel.json` installs the whole workspace, runs `pnpm -w run build:web`, and
+serves `dist`. Leaving Root Directory at the repo root also works: the root `vercel.json` does the
+same from there.
 
 ## Develop
 
