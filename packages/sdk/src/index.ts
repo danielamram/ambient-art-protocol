@@ -32,6 +32,7 @@ export {
 export { mount, SourceRegistry } from './registry.js';
 // Shader contract
 export {
+  type PostHints,
   type ShaderManifest,
   STANDARD_UNIFORMS,
   type StandardUniform,

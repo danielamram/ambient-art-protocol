@@ -24,17 +24,25 @@ Read `docs/brainstorm.md` for the design critique and the reasoning behind the d
 - `packages/sdk` (`@ambient/sdk`): protocol types, `DataSignalBus`, `createSource()`,
   `SourceRegistry`, `SignalTransport`, `ShaderManifest`. Isomorphic: no DOM, no Node-only APIs.
   `@ambient/sdk/testing` ships `createMockSource` and `collect`.
-- `packages/engine` (`@ambient/engine`): `SignalToUniformMapper`, `PulseBuffer`, `FrameLoop`, and
-  `CanvasRenderer` (WebGL2 fullscreen triangle, loads a `ShaderManifest`). The mapper and loop
-  are isomorphic; only `renderer.ts` touches the DOM.
+- `packages/engine` (`@ambient/engine`): `SignalToUniformMapper`, `PulseBuffer`, `FrameLoop`,
+  `QualityController`, and `CanvasRenderer` (WebGL2 fullscreen triangle that loads a
+  `ShaderManifest` and runs it through a post stack: scene FBO with a ping-pong pair for feedback,
+  bright pass + separable blur for bloom, then a composite pass with chromatic aberration,
+  vignette, ACES tonemap, grain and dither). Pure pieces (`post/settings.ts`, `post/plan.ts`,
+  `post/shaders.ts`, `quality.ts`, `energy.ts`) are unit-tested in Node; only `renderer.ts` and
+  `gl/targets.ts` touch WebGL.
 - `packages/sources` (`@ambient/sources`): built-in plugins. Shipped: `wikipedia-edits` (Wikimedia
   EventStreams over SSE) and `binance-trades` (public WebSocket), both keyless and browser-native,
   with injectable `EventSource`/`WebSocket` constructors for tests and Node. `waitForOpen` makes
   `start()` resolve only once connected, so 'running' means live.
 - `packages/shaders` (`@ambient/shaders`): GLSL ES 3.00 themes as `ShaderManifest` objects.
-  Shipped: `aurora-drift`. Planned: `cybernetic-mesh`, `fluid-field`.
+  Shipped: `aurora-drift` (warped light curtains), `fluid-field` (feedback-advected ink), and
+  `cybernetic-mesh` (raymarched wire sphere over a floor grid). Shared chunks live in
+  `src/lib/glsl.ts` (noise, palette, pulse helpers, standard uniform block).
 - `apps/web`: Vite + React full-screen canvas with a floating overlay (theme picker, sliders that
-  emit onto the bus, tap-to-pulse, mock source toggle, live readout). Deployed to Vercel from
+  emit onto the bus, tap-to-pulse, drag-to-steer, post FX and quality controls, mock source
+  toggle, live readout). The overlay and cursor hide after a few idle seconds; `space` pulses,
+  `1..n` pick a theme, `h` hides the panel, `f` goes fullscreen. Deployed to Vercel from
   `vercel.json` at the root.
 
 ## Code Conventions
@@ -48,7 +56,14 @@ Read `docs/brainstorm.md` for the design critique and the reasoning behind the d
 - Biome for lint and format (`pnpm lint`, `pnpm lint:fix`). No ESLint or Prettier.
 - Tests live in `packages/*/test/*.test.ts` and run with vitest from the root. Use
   `vi.useFakeTimers()` *before* subscribing when testing time-based operators.
-- Renderer will be raw WebGL2 (fullscreen triangle + fragment shader). No Three.js.
+- Renderer is raw WebGL2 (fullscreen triangle + fragment shader). No Three.js.
+- **Theme authoring.** Themes output linear, HDR-ish colour and never tonemap, gamma-correct or
+  vignette themselves; the engine's composite pass does. Standard uniforms are the ones in
+  `STANDARD_UNIFORMS`: besides the signal uniforms there is `u_energy` (activity envelope, 0..1),
+  `u_dt` (seconds since last frame) and, for `feedback: true` themes, `sampler2D u_prevFrame`
+  (last frame's scene). Feedback decay must be frame-rate independent:
+  `prev * pow(retentionPerSecond, u_dt)`, minus `1.5/255.0` so 8-bit fallbacks reach black.
+  Themes may branch on the `AAP_QUALITY` define (1 full, 0 cheap) for adaptive quality.
 
 ## Commands
 ```
@@ -68,10 +83,12 @@ pnpm check        # typecheck + lint + test
 - Phase 1 (done): workspace, `@ambient/sdk`, tests, demo.
 - Phase 2 (done): `SignalToUniformMapper`, `PulseBuffer` (ring of 8), `FrameLoop` in `engine`.
   Targets are written by bus subscriptions; `tick(dt)` damps current state with `expDamp`.
-- Phase 3 (partial): `CanvasRenderer` and the `aurora-drift` theme are done. Still to do:
-  `cybernetic-mesh` (raymarched sphere) and `fluid-field` (2D fluid sim).
+- Phase 3 (done): `CanvasRenderer` with the post stack (feedback, bloom, tonemap, grain),
+  adaptive `QualityController`, and the `aurora-drift`, `fluid-field` (feedback-advected ink,
+  not a Navier-Stokes solver) and `cybernetic-mesh` themes.
 - Phase 4 (partial): `wikipedia-edits` and `binance-trades` are done and toggleable in the web app.
   Still to do: `webhook-pulse` (Node HTTP endpoint) plus the WebSocket relay transport so Node-side
   sources can feed a browser renderer. Plugins that die after starting call `ctx.fail(err)`.
-- Phase 5 (initial): `apps/web` exists with the overlay. Still to do: signal scope sparklines,
+- Phase 5 (partial): `apps/web` has the overlay, cinema mode (idle auto-hide), keyboard
+  shortcuts, drag-to-steer, post FX and quality controls. Still to do: signal scope sparklines,
   source presets, recorder/replayer.

@@ -1,4 +1,12 @@
-import { CanvasRenderer, FrameLoop, SignalToUniformMapper } from '@ambient/engine';
+import {
+  CanvasRenderer,
+  FrameLoop,
+  type PostSettings,
+  QUALITY_LEVELS,
+  QualityController,
+  type QualityLevel,
+  SignalToUniformMapper,
+} from '@ambient/engine';
 import { DataSignalBus, type Source, SourceRegistry, type SourceStatus } from '@ambient/sdk';
 import { createMockSource } from '@ambient/sdk/testing';
 import { auroraDrift, findShader, SHADER_MANIFESTS } from '@ambient/shaders';
@@ -6,14 +14,20 @@ import { binanceTrades, wikipediaEdits } from '@ambient/sources';
 
 export const OVERLAY_SOURCE = 'overlay';
 
+export type QualityMode = 'auto' | 'high' | 'low';
+
 export interface Readout {
   mood: number;
   turbulence: number;
   current: readonly [number, number, number];
   pulse: number;
+  energy: number;
   livePulses: number;
   fps: number;
   time: number;
+  renderScale: number;
+  quality: string;
+  hdr: boolean;
 }
 
 export interface SourceOption {
@@ -45,6 +59,9 @@ export const SOURCE_OPTIONS: readonly SourceOption[] = [
   },
 ];
 
+const isTouchDevice = (): boolean =>
+  typeof navigator !== 'undefined' && (navigator.maxTouchPoints ?? 0) > 0;
+
 /**
  * Everything the page needs, wired once: bus -> mapper -> renderer, driven by a FrameLoop.
  * The React overlay only talks to this object.
@@ -56,21 +73,35 @@ export class AmbientStage {
   readonly renderer: CanvasRenderer;
   readonly loop: FrameLoop;
   readonly themes = SHADER_MANIFESTS;
+  readonly quality = new QualityController();
   readonly #sources = new Map<string, Source>();
+  #qualityMode: QualityMode = 'auto';
   #frames = 0;
   #fpsWindowStart = 0;
   #fps = 0;
   #onReadout: ((r: Readout) => void) | undefined;
   #onSourceStatus: ((id: string, status: SourceStatus) => void) | undefined;
+  #onError: ((message: string) => void) | undefined;
   #resizeObserver: ResizeObserver | undefined;
+  readonly #onVisibility = (): void => {
+    // rAF pauses in background tabs; the first window back would read as a stall.
+    this.#fpsWindowStart = 0;
+    this.#frames = 0;
+    this.quality.reset();
+  };
 
   constructor(canvas: HTMLCanvasElement) {
     this.mapper = new SignalToUniformMapper({ moodTau: 2.0, turbulenceTau: 1.2, currentTau: 0.8 });
     this.mapper.attach(this.bus);
-    this.renderer = new CanvasRenderer({ canvas, manifest: auroraDrift });
+    this.renderer = new CanvasRenderer({
+      canvas,
+      manifest: auroraDrift,
+      maxPixelRatio: isTouchDevice() ? 1.5 : 2,
+    });
     this.loop = new FrameLoop((dt, now) => this.#frame(dt, now));
     this.#resizeObserver = new ResizeObserver(() => this.#resize());
     this.#resizeObserver.observe(canvas);
+    document.addEventListener('visibilitychange', this.#onVisibility);
     this.#resize();
   }
 
@@ -86,9 +117,45 @@ export class AmbientStage {
     this.#onSourceStatus = cb;
   }
 
-  setTheme(id: string): void {
+  /** Runtime failures that should surface in the UI, such as a theme that fails to compile. */
+  onError(cb: (message: string) => void): void {
+    this.#onError = cb;
+  }
+
+  get themeId(): string {
+    return this.renderer.manifest.id;
+  }
+
+  setTheme(id: string): boolean {
     const m = findShader(id);
-    if (m) this.renderer.setShader(m);
+    if (!m) return false;
+    try {
+      this.renderer.setShader(m);
+    } catch (err) {
+      this.#onError?.(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+    this.#onVisibility();
+    return true;
+  }
+
+  get post(): PostSettings {
+    return this.renderer.post;
+  }
+
+  setPost(patch: Partial<PostSettings>): PostSettings {
+    return this.renderer.setPost(patch);
+  }
+
+  get qualityMode(): QualityMode {
+    return this.#qualityMode;
+  }
+
+  setQualityMode(mode: QualityMode): void {
+    this.#qualityMode = mode;
+    if (mode === 'high') this.#applyLevel(this.quality.set(0));
+    else if (mode === 'low') this.#applyLevel(this.quality.set(QUALITY_LEVELS.length - 1));
+    else this.#applyLevel(this.quality.set(0));
   }
 
   /** Overlay sliders are just another source, so everything flows through the bus. */
@@ -136,9 +203,20 @@ export class AmbientStage {
   dispose(): void {
     this.loop.stop();
     this.#resizeObserver?.disconnect();
+    document.removeEventListener('visibilitychange', this.#onVisibility);
     this.mapper.dispose();
     this.renderer.dispose();
     void this.registry.dispose();
+  }
+
+  #applyLevel(level: QualityLevel): void {
+    this.renderer.setRenderScale(level.renderScale);
+    this.renderer.setPost({ blurIterations: level.blurIterations });
+    try {
+      this.renderer.setShaderQuality(level.shaderQuality);
+    } catch (err) {
+      this.#onError?.(err instanceof Error ? err.message : String(err));
+    }
   }
 
   #resize(): void {
@@ -151,19 +229,32 @@ export class AmbientStage {
     const state = this.mapper.snapshot();
     this.renderer.render(state);
     this.#frames += 1;
-    if (now - this.#fpsWindowStart >= 0.5) {
-      this.#fps = this.#frames / (now - this.#fpsWindowStart);
-      this.#frames = 0;
+    if (this.#fpsWindowStart === 0) {
       this.#fpsWindowStart = now;
-      this.#onReadout?.({
-        mood: state.u_mood,
-        turbulence: state.u_turbulence,
-        current: state.u_current,
-        pulse: state.u_pulse,
-        livePulses: this.mapper.pulses.size,
-        fps: this.#fps,
-        time: state.u_time,
-      });
+      this.#frames = 0;
+      return;
     }
+    const window = now - this.#fpsWindowStart;
+    if (window < 0.5) return;
+    this.#fps = this.#frames / window;
+    this.#frames = 0;
+    this.#fpsWindowStart = now;
+    if (this.#qualityMode === 'auto') {
+      const next = this.quality.feed(this.#fps, window);
+      if (next) this.#applyLevel(next);
+    }
+    this.#onReadout?.({
+      mood: state.u_mood,
+      turbulence: state.u_turbulence,
+      current: state.u_current,
+      pulse: state.u_pulse,
+      energy: state.u_energy,
+      livePulses: this.mapper.pulses.size,
+      fps: this.#fps,
+      time: state.u_time,
+      renderScale: this.renderer.renderScale,
+      quality: this.quality.level.name,
+      hdr: this.renderer.hdr,
+    });
   }
 }

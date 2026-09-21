@@ -15,6 +15,31 @@ describe('SignalToUniformMapper', () => {
     expect(s.u_pulse).toBe(0);
     expect(s.u_pulses).toHaveLength(32);
     expect(s.u_resolution).toEqual([1, 1]);
+    expect(s.u_energy).toBe(0);
+    expect(s.u_dt).toBe(0);
+  });
+
+  it('energy rises with pulses, clamps at 1, and decays with energyTau', () => {
+    const bus = new DataSignalBus();
+    const m = new SignalToUniformMapper({ energyTau: 1, energyGain: 0.5 }).attach(bus);
+    bus.emitPayload({ type: 'pulse', magnitude: 0.6 }, src);
+    expect(m.snapshot().u_energy).toBeCloseTo(0.3, 8);
+    for (let i = 0; i < 5; i += 1) bus.emitPayload({ type: 'pulse', magnitude: 1 }, src);
+    expect(m.snapshot().u_energy).toBe(1);
+    m.tick(1);
+    const s = m.snapshot();
+    expect(s.u_energy).toBeCloseTo(Math.exp(-1), 6);
+    expect(s.u_dt).toBe(1);
+    m.tick(0.25);
+    expect(m.snapshot().u_dt).toBe(0.25);
+  });
+
+  it('pushPulse() feeds the buffer and energy without a bus', () => {
+    const m = new SignalToUniformMapper({ energyGain: 0.35 });
+    m.pushPulse({ magnitude: 1 });
+    m.tick(0);
+    expect(m.snapshot().u_pulse).toBe(1);
+    expect(m.snapshot().u_energy).toBeCloseTo(0.35, 8);
   });
 
   it('honors initial values and setResolution', () => {

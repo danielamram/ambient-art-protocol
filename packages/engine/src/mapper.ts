@@ -1,6 +1,7 @@
 import type { DataSignalBus } from '@ambient/sdk';
 import type { Subscription } from 'rxjs';
 import { expDamp } from './damp.js';
+import { addEnergy, decayEnergy } from './energy.js';
 import { PulseBuffer, type PulseBufferOptions } from './pulse-buffer.js';
 
 /** The values a shader reads each frame. Every scalar is in [0, 1] except u_time. */
@@ -17,6 +18,10 @@ export interface UniformState {
   u_current: readonly [number, number, number];
   u_turbulence: number;
   u_mood: number;
+  /** Activity envelope, 0..1. Rises with every pulse, decays with `energyTau`. */
+  u_energy: number;
+  /** Seconds advanced by the last `tick`. Feedback shaders scale their decay by it. */
+  u_dt: number;
 }
 
 export interface MapperOptions {
@@ -26,6 +31,10 @@ export interface MapperOptions {
   readonly turbulenceTau?: number;
   /** Time constant for the current vector. Default 0.6. */
   readonly currentTau?: number;
+  /** Time constant for the energy envelope's decay. Default 1.5. */
+  readonly energyTau?: number;
+  /** How much of a pulse's magnitude is added to energy. Default 0.35. */
+  readonly energyGain?: number;
   /** Initial values before any signal arrives. */
   readonly initial?: Partial<{
     mood: number;
@@ -50,7 +59,11 @@ export class SignalToUniformMapper {
   readonly moodTau: number;
   readonly turbulenceTau: number;
   readonly currentTau: number;
+  readonly energyTau: number;
+  readonly energyGain: number;
 
+  #energy = 0;
+  #dt = 0;
   #target = { mood: 0.5, turbulence: 0.2, current: [0.5, 0.5, 0] as [number, number, number] };
   #current = { mood: 0.5, turbulence: 0.2, current: [0.5, 0.5, 0] as [number, number, number] };
   #time = 0;
@@ -62,6 +75,8 @@ export class SignalToUniformMapper {
     this.moodTau = options.moodTau ?? 2.5;
     this.turbulenceTau = options.turbulenceTau ?? 1.0;
     this.currentTau = options.currentTau ?? 0.6;
+    this.energyTau = options.energyTau ?? 1.5;
+    this.energyGain = options.energyGain ?? 0.35;
     this.pulses = new PulseBuffer(options.pulses);
     const init = options.initial ?? {};
     if (init.mood !== undefined) this.#target.mood = this.#current.mood = init.mood;
@@ -83,7 +98,10 @@ export class SignalToUniformMapper {
         .on('ambiance')
         .subscribe((a) => this.setTarget({ mood: a.moodScore, turbulence: a.turbulence })),
       bus.on('current').subscribe((c) => this.setTarget({ current: [c.x, c.y, c.velocity] })),
-      bus.on('pulse').subscribe((p) => this.pulses.push(p)),
+      bus.on('pulse').subscribe((p) => {
+        this.pulses.push(p);
+        this.#energy = addEnergy(this.#energy, p.magnitude, this.energyGain);
+      }),
     ];
     return this;
   }
@@ -122,6 +140,8 @@ export class SignalToUniformMapper {
   tick(dt: number): void {
     const step = Number.isFinite(dt) && dt > 0 ? dt : 0;
     this.#time += step;
+    this.#dt = step;
+    this.#energy = decayEnergy(this.#energy, step, this.energyTau);
     const c = this.#current;
     const t = this.#target;
     c.mood = expDamp(c.mood, t.mood, this.moodTau, step);
@@ -144,6 +164,8 @@ export class SignalToUniformMapper {
       u_current: this.#current.current,
       u_turbulence: this.#current.turbulence,
       u_mood: this.#current.mood,
+      u_energy: this.#energy,
+      u_dt: this.#dt,
     };
   }
 
@@ -160,8 +182,15 @@ export class SignalToUniformMapper {
     };
   }
 
+  /** Push a pulse straight into the buffer and energy envelope, bypassing the bus. */
+  pushPulse(pulse: Parameters<PulseBuffer['push']>[0]): void {
+    this.pulses.push(pulse);
+    this.#energy = addEnergy(this.#energy, pulse.magnitude, this.energyGain);
+  }
+
   dispose(): void {
     this.detach();
     this.pulses.clear();
+    this.#energy = 0;
   }
 }
