@@ -14,6 +14,7 @@
     "@ambient/engine": "workspace:*",
     "@ambient/sdk": "workspace:*",
     "@ambient/shaders": "workspace:*",
+    "@ambient/sources": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:",
     "rxjs": "catalog:"

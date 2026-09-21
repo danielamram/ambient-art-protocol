@@ -1,7 +1,8 @@
 import { CanvasRenderer, FrameLoop, SignalToUniformMapper } from '@ambient/engine';
-import { DataSignalBus, type Source, SourceRegistry } from '@ambient/sdk';
+import { DataSignalBus, type Source, SourceRegistry, type SourceStatus } from '@ambient/sdk';
 import { createMockSource } from '@ambient/sdk/testing';
 import { auroraDrift, findShader, SHADER_MANIFESTS } from '@ambient/shaders';
+import { binanceTrades, wikipediaEdits } from '@ambient/sources';
 
 export const OVERLAY_SOURCE = 'overlay';
 
@@ -15,6 +16,35 @@ export interface Readout {
   time: number;
 }
 
+export interface SourceOption {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly create: () => Source;
+}
+
+/** The sources the overlay can toggle. All free, keyless, and browser-native. */
+export const SOURCE_OPTIONS: readonly SourceOption[] = [
+  {
+    id: 'wikipedia-edits',
+    name: 'Wikipedia edits',
+    description: 'Every human edit on Wikimedia, live. Each edit pulses at a spot fixed per page.',
+    create: () => wikipediaEdits({ tickMs: 2000 }),
+  },
+  {
+    id: 'binance-trades',
+    name: 'BTC/USDT trades',
+    description: 'Binance public trade stream. Big trades pulse, volatility drives turbulence.',
+    create: () => binanceTrades({ symbol: 'btcusdt' }),
+  },
+  {
+    id: 'mock',
+    name: 'Mock source',
+    description: 'Deterministic pseudo-random signals for testing.',
+    create: () => createMockSource({ intervalMs: 900, seed: Date.now() % 100000 }),
+  },
+];
+
 /**
  * Everything the page needs, wired once: bus -> mapper -> renderer, driven by a FrameLoop.
  * The React overlay only talks to this object.
@@ -26,11 +56,12 @@ export class AmbientStage {
   readonly renderer: CanvasRenderer;
   readonly loop: FrameLoop;
   readonly themes = SHADER_MANIFESTS;
-  #mock: Source | undefined;
+  readonly #sources = new Map<string, Source>();
   #frames = 0;
   #fpsWindowStart = 0;
   #fps = 0;
   #onReadout: ((r: Readout) => void) | undefined;
+  #onSourceStatus: ((id: string, status: SourceStatus) => void) | undefined;
   #resizeObserver: ResizeObserver | undefined;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -49,6 +80,10 @@ export class AmbientStage {
 
   onReadout(cb: (r: Readout) => void): void {
     this.#onReadout = cb;
+  }
+
+  onSourceStatus(cb: (id: string, status: SourceStatus) => void): void {
+    this.#onSourceStatus = cb;
   }
 
   setTheme(id: string): void {
@@ -72,19 +107,29 @@ export class AmbientStage {
     );
   }
 
-  get mockRunning(): boolean {
-    return this.#mock?.status === 'running';
+  sourceStatus(id: string): SourceStatus {
+    return this.#sources.get(id)?.status ?? 'idle';
   }
 
-  async setMock(on: boolean): Promise<void> {
+  /** Start or stop one of SOURCE_OPTIONS by id. Errors surface as the source's 'error' status. */
+  async setSource(id: string, on: boolean): Promise<void> {
+    let source = this.#sources.get(id);
     if (on) {
-      if (!this.#mock) {
-        this.#mock = createMockSource({ intervalMs: 900, seed: Date.now() % 100000 });
-        this.registry.add(this.#mock);
+      if (!source) {
+        const opt = SOURCE_OPTIONS.find((o) => o.id === id);
+        if (!opt) return;
+        source = opt.create();
+        this.#sources.set(id, source);
+        this.registry.add(source);
+        source.status$.subscribe((status) => this.#onSourceStatus?.(id, status));
       }
-      await this.#mock.start(this.bus);
-    } else if (this.#mock) {
-      await this.#mock.stop();
+      try {
+        await source.start(this.bus);
+      } catch (err) {
+        console.error(`[ambient] source "${id}" failed to start`, err);
+      }
+    } else if (source) {
+      await source.stop();
     }
   }
 

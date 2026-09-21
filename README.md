@@ -75,8 +75,10 @@ pnpm install
 pnpm dev:web   # http://localhost:5173
 ```
 
-Tap the canvas to send a pulse. The sliders emit `ambiance` and `current` signals onto the same
-bus a plugin would, and the mock source toggle mounts a deterministic random source.
+Switch on a live source: **Wikipedia edits** (every human edit on Wikimedia, over Server-Sent
+Events) or **BTC/USDT trades** (Binance public WebSocket). Both are free, need no key, and run in
+the browser. Tap the canvas to send a pulse by hand. The sliders emit `ambiance` and `current`
+signals onto the same bus a plugin would.
 
 ## Deploy
 

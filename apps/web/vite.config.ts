@@ -15,6 +15,7 @@ export default defineConfig({
       { find: '@ambient/sdk', replacement: pkg('sdk/src/index.ts') },
       { find: '@ambient/engine', replacement: pkg('engine/src/index.ts') },
       { find: '@ambient/shaders', replacement: pkg('shaders/src/index.ts') },
+      { find: '@ambient/sources', replacement: pkg('sources/src/index.ts') },
     ],
   },
   build: { target: 'es2022', sourcemap: true },

@@ -1,12 +1,29 @@
 /**
  * @ambient/sources
  *
- * Phase 4 will add, each built with createSource() from @ambient/sdk:
- *   - mock-crypto:   polls mock price volatility, emits ambiance (mood = trend, turbulence = volatility)
- *   - webhook-pulse: Node HTTP endpoint; every JSON POST to /api/event emits a pulse
- *   - websocket:     generic WebSocket client with a user-supplied mapper fn
- *   - rest-poll:     generic polling client with a user-supplied mapper fn
- *
- * Until then, use `createMockSource` from '@ambient/sdk/testing'.
+ * Built-in data source plugins, each made with createSource() from @ambient/sdk.
+ * All of them run in the browser with no API key. In Node, pass an EventSource or WebSocket
+ * implementation through the config.
  */
 export { createMockSource } from '@ambient/sdk/testing';
+export {
+  BINANCE_MARKET_DATA_WS,
+  type BinanceTrade,
+  type BinanceTradesConfig,
+  binanceTrades,
+  mapTrade,
+  summarizeWindow,
+  type WebSocketInstance,
+  type WebSocketLike,
+} from './binance-trades.js';
+export { type Openable, waitForOpen } from './connect.js';
+export { hashToPoint, RateWindow, RollingSeries } from './stats.js';
+export {
+  type EventSourceInstance,
+  type EventSourceLike,
+  mapRecentChange,
+  type RecentChange,
+  WIKIMEDIA_RECENTCHANGE_URL,
+  type WikipediaEditsConfig,
+  wikipediaEdits,
+} from './wikipedia-edits.js';

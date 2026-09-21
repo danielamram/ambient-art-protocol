@@ -27,7 +27,10 @@ Read `docs/brainstorm.md` for the design critique and the reasoning behind the d
 - `packages/engine` (`@ambient/engine`): `SignalToUniformMapper`, `PulseBuffer`, `FrameLoop`, and
   `CanvasRenderer` (WebGL2 fullscreen triangle, loads a `ShaderManifest`). The mapper and loop
   are isomorphic; only `renderer.ts` touches the DOM.
-- `packages/sources` (`@ambient/sources`): built-in source plugins. **Phase 4, stub today.**
+- `packages/sources` (`@ambient/sources`): built-in plugins. Shipped: `wikipedia-edits` (Wikimedia
+  EventStreams over SSE) and `binance-trades` (public WebSocket), both keyless and browser-native,
+  with injectable `EventSource`/`WebSocket` constructors for tests and Node. `waitForOpen` makes
+  `start()` resolve only once connected, so 'running' means live.
 - `packages/shaders` (`@ambient/shaders`): GLSL ES 3.00 themes as `ShaderManifest` objects.
   Shipped: `aurora-drift`. Planned: `cybernetic-mesh`, `fluid-field`.
 - `apps/web`: Vite + React full-screen canvas with a floating overlay (theme picker, sliders that
@@ -67,7 +70,8 @@ pnpm check        # typecheck + lint + test
   Targets are written by bus subscriptions; `tick(dt)` damps current state with `expDamp`.
 - Phase 3 (partial): `CanvasRenderer` and the `aurora-drift` theme are done. Still to do:
   `cybernetic-mesh` (raymarched sphere) and `fluid-field` (2D fluid sim).
-- Phase 4: `mock-crypto` and `webhook-pulse` sources, plus a WebSocket relay transport so
-  Node-side sources can feed a browser renderer.
+- Phase 4 (partial): `wikipedia-edits` and `binance-trades` are done and toggleable in the web app.
+  Still to do: `webhook-pulse` (Node HTTP endpoint) plus the WebSocket relay transport so Node-side
+  sources can feed a browser renderer. Plugins that die after starting call `ctx.fail(err)`.
 - Phase 5 (initial): `apps/web` exists with the overlay. Still to do: signal scope sparklines,
   source presets, recorder/replayer.
