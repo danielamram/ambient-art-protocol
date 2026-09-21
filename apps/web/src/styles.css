@@ -67,6 +67,11 @@ body,
   backdrop-filter: blur(14px);
 }
 
+/* `display: grid` above would otherwise override the UA `[hidden]` rule. */
+.panel[hidden] {
+  display: none;
+}
+
 .panel header h1 {
   font-size: 15px;
   margin: 0 0 4px;
