@@ -80,7 +80,7 @@ void main() {
   vec3 bloom = texture(u_bloom, uv).rgb;
   col += bloom * u_bloomStrength * (0.7 + 0.6 * u_energy);
   float aspect = u_resolution.x / u_resolution.y;
-  float vig = smoothstep(1.0, 0.25, length(d * vec2(aspect, 1.0)));
+  float vig = (1.0 - smoothstep(0.25, 1.0, length(d * vec2(aspect, 1.0))));
   col *= mix(1.0, vig, u_vignette);
   col = pow(aces(col), vec3(1.0 / 2.2));
   float luma = dot(col, vec3(0.299, 0.587, 0.114));

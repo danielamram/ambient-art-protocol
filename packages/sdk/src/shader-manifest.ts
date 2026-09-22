@@ -13,6 +13,8 @@
 
 export const STANDARD_UNIFORMS = [
   'u_time',
+  'u_form',
+  'u_pointer',
   'u_resolution',
   'u_pulse',
   'u_pulses',
@@ -53,12 +55,24 @@ export interface PostHints {
   readonly vignette?: number;
 }
 
+/** Optional instanced ribbon pass, drawn over the fragment background into the same HDR target.
+ * Vertex source is complete GLSL ES 3.00; six vertices per instance, no buffers required.
+ * Analytic trajectories make seeking deterministic and work without float simulation textures.
+ */
+export interface GeometryPass {
+  readonly vertex: string;
+  readonly fragment: string;
+  readonly instances: number;
+  readonly lowInstances: number;
+}
+
 export interface ShaderManifest {
   readonly id: string;
   readonly name: string;
   readonly description?: string;
   /** GLSL ES 3.00 fragment shader source. */
   readonly fragment: string;
+  readonly geometry?: GeometryPass;
   readonly uniforms: readonly UniformDeclaration[];
   /** When true the engine binds `u_prevFrame` to last frame's scene texture. */
   readonly feedback?: boolean;

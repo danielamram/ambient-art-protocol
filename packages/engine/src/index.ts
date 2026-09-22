@@ -8,6 +8,7 @@
  */
 export const ENGINE_VERSION = '0.3.0' as const;
 
+export { ArtClock } from './art-clock.js';
 export { expDamp, expDampAngle } from './damp.js';
 export { addEnergy, decayEnergy } from './energy.js';
 export { type FrameCallback, FrameLoop, type FrameLoopOptions } from './frame-loop.js';

@@ -49,14 +49,14 @@ void main() {
   prev += texture(u_prevFrame, back + vec2(0.0, tx.y)).rgb * 0.1;
   prev += texture(u_prevFrame, back - vec2(0.0, tx.y)).rgb * 0.1;
   // Retention per second, made frame-rate independent, with the 8-bit floor removed.
-  prev = max(prev * pow(0.5, u_dt) - 1.5 / 255.0, 0.0);
+  prev = max(prev * pow(0.5, u_dt) - (AAP_HDR == 0 ? 1.5 / 255.0 * u_dt * 60.0 : 0.0), 0.0);
 
   vec3 dye = vec3(0.0);
   for (int i = 0; i < 8; i++) {
     vec4 pl = u_pulses[i];
     if (pl.w <= 0.0) continue;
     float d = pulseDist(uv, pl, aspect);
-    float young = smoothstep(0.45, 0.0, pl.z);
+    float young = (1.0 - smoothstep(0.0, 0.45, pl.z));
     vec3 ink = palette(hash1(pl.xy * 37.0) * 0.6 + u_mood * 0.3);
     dye += ink * pl.w * young * exp(-d * d * 260.0) * 0.8;
   }
@@ -78,8 +78,8 @@ void main() {
   // Recolour by density so thick ink goes iridescent, and compress the hottest cores so the
   // tonemapper keeps their hue instead of pushing them to white.
   float dens = max(col.r, max(col.g, col.b));
-  col = mix(col, palette(dens * 0.35 + 0.1) * dens, 0.25);
-  col *= 1.0 / (1.0 + 0.12 * dens);
+  col = mix(col, palette(dens * 0.35 + 0.1) * dens, 1.0 - pow(0.75, u_dt * 60.0));
+  col *= 1.0 / (1.0 + 0.12 * dens * u_dt * 60.0);
 
   fragColor = vec4(col, 1.0);
 }

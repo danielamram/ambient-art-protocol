@@ -71,7 +71,7 @@ vec3 calcNormal(vec3 q) {
 
 float gridLines(vec2 g, float w) {
   vec2 f = abs(fract(g) - 0.5);
-  return smoothstep(w, 0.0, min(f.x, f.y));
+  return (1.0 - smoothstep(w - fwidth(min(f.x, f.y)), w + fwidth(min(f.x, f.y)), min(f.x, f.y)));
 }
 
 void main() {
@@ -161,7 +161,7 @@ void main() {
 
   // Light motion trail.
   vec3 prev = texture(u_prevFrame, uv).rgb;
-  prev = max(prev * pow(0.03, u_dt) - 1.5 / 255.0, 0.0);
+  prev = max(prev * pow(0.03, u_dt) - (AAP_HDR == 0 ? 1.5 / 255.0 * u_dt * 60.0 : 0.0), 0.0);
   col = max(col, prev);
 
   fragColor = vec4(col, 1.0);

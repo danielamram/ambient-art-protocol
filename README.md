@@ -6,9 +6,17 @@ Plug in a data source (a webhook, a WebSocket feed, a polling API), have it emit
 signals, and watch a fragment shader breathe with it. Sources know nothing about shaders. Shaders
 know nothing about sources. A small, versioned JSON protocol sits in between.
 
-**Status: early, but it renders.** The SDK, signal bus, plugin API, uniform mapper, a WebGL2
-renderer, one shader theme, and a web app with a control overlay are implemented and tested.
-Built-in sources and more themes are next. See the roadmap in `CLAUDE.md`.
+**Six real-time studies, one signal protocol.** The default collection is now Living Filaments
+(instanced 3D ribbons), Chromatic Ink (density feedback with pearlescent shading), and Resonant
+Silk (an interference surface). Aurora Drift, Fluid Field, and Cybernetic Mesh remain available
+in the scene selector. See [the visual implementation notes](docs/visual-refinement.md).
+
+![Living Filaments](docs/visuals/living-filaments.png)
+
+Hold the canvas to gather light; release to send a pulse. Open the tuning panel for palette,
+form, motion, glow, live source, and quality. Press **P** to pause, **1–6** for scenes, **F** for
+fullscreen, **H** for controls, or **Space** to pulse. System reduced-motion preferences slow
+the artwork; pause freezes it. Live sources are opt-in.
 
 ## The protocol
 
@@ -77,8 +85,8 @@ pnpm dev:web   # http://localhost:5173
 
 Switch on a live source: **Wikipedia edits** (every human edit on Wikimedia, over Server-Sent
 Events) or **BTC/USDT trades** (Binance public WebSocket). Both are free, need no key, and run in
-the browser. Tap the canvas to send a pulse by hand. The sliders emit `ambiance` and `current`
-signals onto the same bus a plugin would.
+the browser. Hold and release the canvas to send a pulse by hand. Sources still emit normalized signals on
+the same bus; local form, pointer, and playback controls belong to the renderer.
 
 ## Deploy
 
@@ -94,6 +102,7 @@ Requires Node 20+ and pnpm 10.
 
 ```
 pnpm install
+pnpm build       # build workspace declarations first
 pnpm check       # typecheck + lint + test
 pnpm dev         # watch a mock source stream signals through the bus
 pnpm dev:engine  # same, through the mapper: targets vs damped values

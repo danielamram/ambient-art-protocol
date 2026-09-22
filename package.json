@@ -21,12 +21,14 @@
     "dev:engine": "tsx packages/engine/examples/demo.ts",
     "dev:web": "pnpm --filter @ambient/web dev",
     "clean": "pnpm -r run clean",
-    "check": "pnpm typecheck && pnpm lint && pnpm test"
+    "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "test:visual": "node scripts/visual-check.mjs"
   },
   "devDependencies": {
     "@ambient/sdk": "workspace:*",
     "@biomejs/biome": "catalog:",
     "@types/node": "catalog:",
+    "playwright": "^1.63.0",
     "rxjs": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",

@@ -56,13 +56,13 @@ Read `docs/brainstorm.md` for the design critique and the reasoning behind the d
 - Biome for lint and format (`pnpm lint`, `pnpm lint:fix`). No ESLint or Prettier.
 - Tests live in `packages/*/test/*.test.ts` and run with vitest from the root. Use
   `vi.useFakeTimers()` *before* subscribing when testing time-based operators.
-- Renderer is raw WebGL2 (fullscreen triangle + fragment shader). No Three.js.
+- Renderer is raw WebGL2: fullscreen fragment scenes plus optional six-vertex instanced ribbon passes. No Three.js.
 - **Theme authoring.** Themes output linear, HDR-ish colour and never tonemap, gamma-correct or
   vignette themselves; the engine's composite pass does. Standard uniforms are the ones in
   `STANDARD_UNIFORMS`: besides the signal uniforms there is `u_energy` (activity envelope, 0..1),
   `u_dt` (seconds since last frame) and, for `feedback: true` themes, `sampler2D u_prevFrame`
   (last frame's scene). Feedback decay must be frame-rate independent:
-  `prev * pow(retentionPerSecond, u_dt)`, minus `1.5/255.0` so 8-bit fallbacks reach black.
+  `prev * pow(retentionPerSecond, u_dt)`, with an 8-bit-only floor subtraction scaled by `u_dt * 60.0`. HDR paths do not subtract the quantization floor.
   Themes may branch on the `AAP_QUALITY` define (1 full, 0 cheap) for adaptive quality.
 
 ## Commands
@@ -92,3 +92,13 @@ pnpm check        # typecheck + lint + test
 - Phase 5 (partial): `apps/web` has the overlay, cinema mode (idle auto-hide), keyboard
   shortcuts, drag-to-steer, post FX and quality controls. Still to do: signal scope sparklines,
   source presets, recorder/replayer.
+
+## Visual collection update
+- Read `docs/visual-refinement.md` for the new scene contract and verification commands.
+- Default themes: Living Filaments, Chromatic Ink, Resonant Silk; the original three remain.
+- `ShaderManifest.geometry` is optional. Its vertex source uses `gl_InstanceID` and `gl_VertexID`;
+  the renderer owns resource lifecycle, draw calls, blending, post and transitions.
+- `u_form` and `u_pointer` are renderer-owned art controls, not new wire signals.
+- `ArtClock` owns playback speed and reduced motion independently of source timestamps.
+- `pnpm test:visual` starts Vite and runs real Chromium shader/interaction checks; install the
+  browser with `pnpm exec playwright install chromium` first. `CHROMIUM_PATH` overrides the binary.

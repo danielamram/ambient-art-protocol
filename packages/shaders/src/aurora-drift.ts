@@ -70,7 +70,7 @@ void main() {
     float d = pulseDist(uv, pl, aspect);
     float r = pl.z * 0.6;
     ripple += pl.w * exp(-pow((d - r) * 16.0, 2.0));
-    flare += pl.w * exp(-d * d * 30.0) * smoothstep(0.6, 0.0, pl.z);
+    flare += pl.w * exp(-d * d * 30.0) * (1.0 - smoothstep(0.0, 0.6, pl.z));
   }
   col += ripple * palette(0.8 + u_time * 0.02) * 1.6;
   col += flare * (ridge + 0.3) * palette(0.2) * 2.0;
@@ -79,7 +79,7 @@ void main() {
 
   // Feedback: a short trail that drifts with the current. max() keeps it bounded by the source.
   vec3 prev = texture(u_prevFrame, uv + dir * u_dt * 0.03).rgb;
-  prev = max(prev * pow(0.10, u_dt) - 1.5 / 255.0, 0.0);
+  prev = max(prev * pow(0.10, u_dt) - (AAP_HDR == 0 ? 1.5 / 255.0 * u_dt * 60.0 : 0.0), 0.0);
   col = max(col, prev);
 
   fragColor = vec4(col, 1.0);
