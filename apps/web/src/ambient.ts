@@ -1,4 +1,5 @@
 import {
+  ArtClock,
   CanvasRenderer,
   FrameLoop,
   type PostSettings,
@@ -9,7 +10,7 @@ import {
 } from '@ambient/engine';
 import { DataSignalBus, type Source, SourceRegistry, type SourceStatus } from '@ambient/sdk';
 import { createMockSource } from '@ambient/sdk/testing';
-import { auroraDrift, findShader, SHADER_MANIFESTS } from '@ambient/shaders';
+import { findShader, livingFilaments, SHADER_MANIFESTS } from '@ambient/shaders';
 import { binanceTrades, wikipediaEdits } from '@ambient/sources';
 
 export const OVERLAY_SOURCE = 'overlay';
@@ -74,6 +75,21 @@ export class AmbientStage {
   readonly loop: FrameLoop;
   readonly themes = SHADER_MANIFESTS;
   readonly quality = new QualityController();
+  readonly clock = new ArtClock();
+  form = 0.45;
+  #pointer: [number, number, number] = [0.5, 0.5, 0];
+  #pointerTarget: [number, number, number] = [0.5, 0.5, 0];
+  readonly #motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  readonly #onMotion = (): void => {
+    this.clock.reduced = this.#motionQuery.matches;
+  };
+  #captureTime: number | undefined;
+  #dirty = true;
+  #lastWall = 0;
+  readonly #onRestore = (): void => {
+    this.#dirty = true;
+  };
+
   readonly #sources = new Map<string, Source>();
   #qualityMode: QualityMode = 'auto';
   #frames = 0;
@@ -95,7 +111,7 @@ export class AmbientStage {
     this.mapper.attach(this.bus);
     this.renderer = new CanvasRenderer({
       canvas,
-      manifest: auroraDrift,
+      manifest: livingFilaments,
       maxPixelRatio: isTouchDevice() ? 1.5 : 2,
     });
     this.loop = new FrameLoop((dt, now) => this.#frame(dt, now));
@@ -103,6 +119,35 @@ export class AmbientStage {
     this.#resizeObserver.observe(canvas);
     document.addEventListener('visibilitychange', this.#onVisibility);
     this.#resize();
+    this.#onMotion();
+    this.#motionQuery.addEventListener('change', this.#onMotion);
+    canvas.addEventListener('webglcontextrestored', this.#onRestore);
+    // Explicit deterministic capture mode: fixed time, no sources and no adaptive quality.
+    const query = new URLSearchParams(location.search);
+    const at = Number(query.get('time'));
+    if (query.has('capture') && Number.isFinite(at)) {
+      this.#captureTime = Math.max(0, Math.min(at, 3600));
+      this.#qualityMode = 'high';
+    }
+  }
+
+  setPaused(paused: boolean): void {
+    this.clock.paused = paused;
+    this.#onVisibility();
+  }
+
+  invalidate(): void {
+    this.#dirty = true;
+  }
+
+  setPointer(x: number, y: number, down: boolean): void {
+    this.#pointerTarget = [x, y, down ? 1 : 0];
+    this.#dirty = true;
+  }
+
+  resetLook(): PostSettings {
+    this.#dirty = true;
+    return this.renderer.clearPost('bloom', 'grain', 'aberration', 'vignette', 'bloomThreshold');
   }
 
   start(): void {
@@ -131,6 +176,7 @@ export class AmbientStage {
     if (!m) return false;
     try {
       this.renderer.setShader(m);
+      this.#dirty = true;
     } catch (err) {
       this.#onError?.(err instanceof Error ? err.message : String(err));
       return false;
@@ -144,6 +190,7 @@ export class AmbientStage {
   }
 
   setPost(patch: Partial<PostSettings>): PostSettings {
+    this.#dirty = true;
     return this.renderer.setPost(patch);
   }
 
@@ -160,10 +207,12 @@ export class AmbientStage {
 
   /** Overlay sliders are just another source, so everything flows through the bus. */
   setAmbiance(moodScore: number, turbulence: number): void {
+    this.#dirty = true;
     this.bus.emitPayload({ type: 'ambiance', moodScore, turbulence }, OVERLAY_SOURCE);
   }
 
   setCurrent(x: number, y: number, velocity: number): void {
+    this.#dirty = true;
     this.bus.emitPayload({ type: 'current', x, y, velocity }, OVERLAY_SOURCE);
   }
 
@@ -204,12 +253,15 @@ export class AmbientStage {
     this.loop.stop();
     this.#resizeObserver?.disconnect();
     document.removeEventListener('visibilitychange', this.#onVisibility);
+    this.renderer.canvas.removeEventListener('webglcontextrestored', this.#onRestore);
+    this.#motionQuery.removeEventListener('change', this.#onMotion);
     this.mapper.dispose();
     this.renderer.dispose();
     void this.registry.dispose();
   }
 
   #applyLevel(level: QualityLevel): void {
+    this.#dirty = true;
     this.renderer.setRenderScale(level.renderScale);
     this.renderer.setPost({ blurIterations: level.blurIterations });
     try {
@@ -222,12 +274,33 @@ export class AmbientStage {
   #resize(): void {
     const [w, h] = this.renderer.resize();
     this.mapper.setResolution(w, h);
+    this.#dirty = true;
   }
 
   #frame(dt: number, now: number): void {
-    this.mapper.tick(dt);
+    const wallDt = this.#lastWall ? Math.max(0, Math.min(2, now - this.#lastWall)) : dt;
+    this.#lastWall = now;
+    if (
+      this.clock.paused &&
+      !this.#dirty &&
+      !this.renderer.transitioning &&
+      this.#captureTime === undefined
+    ) {
+      // Stop GPU work too. The existing canvas remains visible until playback resumes.
+      return;
+    }
+    const artDt = this.clock.advance(dt);
+    this.mapper.tick(artDt);
     const state = this.mapper.snapshot();
-    this.renderer.render(state);
+    state.u_time = this.#captureTime ?? this.clock.time;
+    state.u_dt = this.#captureTime === undefined ? artDt : 1 / 60;
+    const blend = 1 - Math.exp(-dt * 7);
+    this.#pointer = this.#pointer.map(
+      (v, i) => v + ((this.#pointerTarget[i] ?? v) - v) * blend,
+    ) as [number, number, number];
+    this.renderer.setArt(this.form, this.#pointer);
+    this.renderer.render(state, wallDt);
+    this.#dirty = false;
     this.#frames += 1;
     if (this.#fpsWindowStart === 0) {
       this.#fpsWindowStart = now;

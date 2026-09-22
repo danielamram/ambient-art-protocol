@@ -1,252 +1,289 @@
-import type { SourceStatus } from '@ambient/sdk';
 import { SHADER_MANIFESTS } from '@ambient/shaders';
 import { useEffect, useRef, useState } from 'react';
 import { AmbientStage, type QualityMode, type Readout, SOURCE_OPTIONS } from './ambient.js';
 
-const f = (n: number) => n.toFixed(2);
-
-const STATUS_LABEL: Record<SourceStatus, string> = {
-  idle: 'off',
-  starting: 'connecting',
-  running: 'live',
-  stopping: 'stopping',
-  stopped: 'off',
-  error: 'error',
+const COLLECTION = SHADER_MANIFESTS.slice(0, 3);
+const PALETTES = [
+  { name: 'Glacier', value: 0, color: '#9adfcd' },
+  { name: 'Ember', value: 0.5, color: '#e8a26a' },
+  { name: 'Iris', value: 1, color: '#b7a0ec' },
+];
+const initialTheme = (): string => {
+  const id = new URLSearchParams(location.search).get('scene');
+  return SHADER_MANIFESTS.find((m) => m.id === id)?.id ?? 'living-filaments';
 };
-
-const IDLE_MS = 3000;
-const DRAG_THRESHOLD_PX = 6;
-
-const isEditable = (t: EventTarget | null): boolean =>
-  t instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(t.tagName);
+const editable = (target: EventTarget | null) =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable || /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(target.tagName));
 
 export function App() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stageRef = useRef<AmbientStage | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [readout, setReadout] = useState<Readout | null>(null);
-  const [open, setOpen] = useState(true);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const stage = useRef<AmbientStage | null>(null);
+  const panel = useRef<HTMLElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const pointer = useRef<number | null>(null);
+  const sourceChange = useRef(Promise.resolve());
+  const [theme, setTheme] = useState(initialTheme);
+  const [open, setOpen] = useState(false);
   const [idle, setIdle] = useState(false);
-  const [theme, setTheme] = useState(SHADER_MANIFESTS[0]?.id ?? 'aurora-drift');
-  const [mood, setMood] = useState(0.5);
-  const [turbulence, setTurbulence] = useState(0.2);
-  const [cx, setCx] = useState(0.5);
-  const [cy, setCy] = useState(0.5);
-  const [velocity, setVelocity] = useState(0);
-  const [postOn, setPostOn] = useState(true);
-  const [bloom, setBloom] = useState(0.65);
-  const [grain, setGrain] = useState(0.3);
+  const [paused, setPaused] = useState(false);
+  const [mood, setMood] = useState(0);
+  const [form, setForm] = useState(0.45);
+  const [motion, setMotion] = useState(0.45);
+  const [bloom, setBloom] = useState(0.28);
   const [quality, setQuality] = useState<QualityMode>('auto');
-  const [sources, setSources] = useState<Record<string, boolean>>({});
-  const [status, setStatus] = useState<Record<string, SourceStatus>>({});
-  const drag = useRef<{
-    x: number;
-    y: number;
-    t: number;
-    startX: number;
-    startY: number;
-    dragging: boolean;
-  } | null>(null);
+  const [source, setSource] = useState('');
+  const [status, setStatus] = useState('Autonomous');
+  const [readout, setReadout] = useState<Readout | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const capture = new URLSearchParams(location.search).has('capture');
+  const active = SHADER_MANIFESTS.find((m) => m.id === theme) ?? SHADER_MANIFESTS[0];
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let stage: AmbientStage;
+    if (!canvas.current) return;
+    let instance: AmbientStage;
     try {
-      stage = new AmbientStage(canvas);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      instance = new AmbientStage(canvas.current);
+      stage.current = instance;
+      instance.setAmbiance(0, 0.2);
+      instance.setTheme(initialTheme());
+      setBloom(instance.post.bloom);
+      instance.onReadout(setReadout);
+      instance.onError(setError);
+      instance.onSourceStatus((_id, s) =>
+        setStatus(
+          s === 'running'
+            ? 'Live signal'
+            : s === 'error'
+              ? 'Source unavailable'
+              : s === 'starting'
+                ? 'Connecting'
+                : 'Autonomous',
+        ),
+      );
+      instance.start();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
       return;
     }
-    stageRef.current = stage;
-    stage.onReadout(setReadout);
-    stage.onSourceStatus((id, s) => setStatus((prev) => ({ ...prev, [id]: s })));
-    stage.onError(setError);
-    stage.start();
     return () => {
-      stage.dispose();
-      stageRef.current = null;
+      stage.current = null;
+      instance.dispose();
     };
   }, []);
 
   useEffect(() => {
-    stageRef.current?.setAmbiance(mood, turbulence);
-  }, [mood, turbulence]);
-
-  useEffect(() => {
-    stageRef.current?.setCurrent(cx, cy, velocity);
-  }, [cx, cy, velocity]);
-
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage) return;
-    if (stage.setTheme(theme)) {
-      setError(null);
-      const p = stage.post;
-      setBloom(p.bloom);
-      setGrain(p.grain);
-    }
-  }, [theme]);
-
-  useEffect(() => {
-    stageRef.current?.setPost({ enabled: postOn, bloom, grain });
-  }, [postOn, bloom, grain]);
-
-  useEffect(() => {
-    stageRef.current?.setQualityMode(quality);
-  }, [quality]);
-
-  // Cinema mode: hide the chrome and the cursor when nobody has touched anything for a while.
-  useEffect(() => {
-    let timer = window.setTimeout(() => setIdle(true), IDLE_MS);
+    let timer = 0;
     const wake = () => {
       setIdle(false);
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => setIdle(true), IDLE_MS);
+      timer = window.setTimeout(() => {
+        if (!panel.current?.contains(document.activeElement)) setIdle(true);
+      }, 7000);
     };
-    const events = ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
-    for (const e of events) window.addEventListener(e, wake, { passive: true });
+    for (const event of ['pointermove', 'pointerdown', 'keydown', 'focusin'])
+      window.addEventListener(event, wake);
+    wake();
     return () => {
       window.clearTimeout(timer);
-      for (const e of events) window.removeEventListener(e, wake);
+      for (const event of ['pointermove', 'pointerdown', 'keydown', 'focusin'])
+        window.removeEventListener(event, wake);
     };
   }, []);
 
+  const selectTheme = (id: string) => {
+    const s = stage.current;
+    if (!s?.setTheme(id)) return;
+    s.setPaused(false);
+    setPaused(false);
+    setTheme(id);
+    setBloom(s.resetLook().bloom);
+    setError(null);
+  };
+  const pause = () => {
+    const s = stage.current;
+    if (!s) return;
+    s.setPaused(!s.clock.paused);
+    setPaused(s.clock.paused);
+  };
+  const fullscreen = () => {
+    const action = document.fullscreenElement
+      ? document.exitFullscreen?.()
+      : document.documentElement.requestFullscreen?.();
+    void action?.catch(() => setError('Fullscreen is not available in this browser.'));
+  };
   useEffect(() => {
-    document.body.classList.toggle('idle', idle);
-  }, [idle]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (isEditable(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        toggle.current?.focus();
+        return;
+      }
+      if (editable(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === ' ') {
         e.preventDefault();
-        stageRef.current?.pulse(1);
-      } else if (e.key === 'h' || e.key === 'H') {
-        setOpen((o) => !o);
-      } else if (e.key === 'f' || e.key === 'F') {
-        const el = document.documentElement;
-        if (document.fullscreenElement) void document.exitFullscreen?.();
-        else void el.requestFullscreen?.();
-      } else if (/^[1-9]$/.test(e.key)) {
-        const m = SHADER_MANIFESTS[Number(e.key) - 1];
-        if (m) setTheme(m.id);
+        stage.current?.pulse(0.65);
+      } else if (e.key.toLowerCase() === 'p') pause();
+      else if (e.key.toLowerCase() === 'h') setOpen((v) => !v);
+      else if (e.key.toLowerCase() === 'f') fullscreen();
+      else if (/^[1-6]$/.test(e.key)) {
+        const next = SHADER_MANIFESTS[Number(e.key) - 1];
+        if (next) selectTheme(next.id);
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  });
 
-  const toggleSource = (id: string, on: boolean) => {
-    setSources((prev) => ({ ...prev, [id]: on }));
-    void stageRef.current?.setSource(id, on);
-  };
-
-  const norm = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const position = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     return {
-      x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
-      y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
     };
   };
-
-  // Tap = pulse. Drag = steer the current; releasing hands the direction to the sliders.
-  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const { x, y } = norm(e);
-    drag.current = { x, y, t: e.timeStamp, startX: e.clientX, startY: e.clientY, dragging: false };
-    e.currentTarget.setPointerCapture(e.pointerId);
+  const release = (e: React.PointerEvent<HTMLCanvasElement>, pulse: boolean) => {
+    if (pointer.current !== e.pointerId) return;
+    pointer.current = null;
+    const p = position(e);
+    stage.current?.setPointer(p.x, p.y, false);
+    if (pulse) stage.current?.pulse(0.7, p);
+    if (e.currentTarget.hasPointerCapture(e.pointerId))
+      e.currentTarget.releasePointerCapture(e.pointerId);
   };
-  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const d = drag.current;
-    if (!d) return;
-    if (!d.dragging && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD_PX) {
-      return;
-    }
-    d.dragging = true;
-    const { x, y } = norm(e);
-    const dt = Math.max(1, e.timeStamp - d.t) / 1000;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const speedPx = Math.hypot((x - d.x) * rect.width, (y - d.y) * rect.height) / dt;
-    const v = Math.min(1, speedPx / 1800);
-    stageRef.current?.setCurrent(x, y, Math.max(v, velocity));
-    d.x = x;
-    d.y = y;
-    d.t = e.timeStamp;
-  };
-  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const d = drag.current;
-    drag.current = null;
-    if (!d) return;
-    const { x, y } = norm(e);
-    if (d.dragging) {
-      setCx(x);
-      setCy(y);
-      stageRef.current?.setCurrent(x, y, velocity);
-    } else {
-      stageRef.current?.pulse(0.9, { x, y });
-    }
+  const changeSource = (id: string) => {
+    setSource(id);
+    // Serialize changes: two feeds never compete for the palette/current accidentally.
+    sourceChange.current = sourceChange.current
+      .then(async () => {
+        const s = stage.current;
+        if (!s) return;
+        for (const opt of SOURCE_OPTIONS) await s.setSource(opt.id, false);
+        if (id) await s.setSource(id, true);
+        else {
+          s.setAmbiance(mood, 0.2);
+          s.setCurrent(0.5, 0.5, 0);
+          setStatus('Autonomous');
+        }
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   };
 
   return (
-    <>
+    <main className={`experience ${idle && !open ? 'is-idle' : ''} ${capture ? 'is-capture' : ''}`}>
       <canvas
-        ref={canvasRef}
+        ref={canvas}
         className="stage"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={() => {
-          drag.current = null;
+        aria-label="Interactive generative artwork. Hold to gather light, release to send a pulse."
+        onPointerDown={(e) => {
+          if (pointer.current !== null) return;
+          pointer.current = e.pointerId;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          const p = position(e);
+          stage.current?.setPointer(p.x, p.y, true);
         }}
+        onPointerMove={(e) => {
+          if (pointer.current === e.pointerId) {
+            const p = position(e);
+            stage.current?.setPointer(p.x, p.y, true);
+          }
+        }}
+        onPointerUp={(e) => release(e, true)}
+        onPointerCancel={(e) => release(e, false)}
+        onLostPointerCapture={(e) => release(e, false)}
       />
-      {error && (
-        <div className="error" role="alert">
-          <strong>Renderer problem.</strong> {error}
+      <header className="masthead chrome">
+        <a className="wordmark" href="./" aria-label="Ambient Art Protocol home">
+          <span className="mark" aria-hidden="true">
+            ◎
+          </span>
+          <span>
+            AMBIENT<span className="wordmark-sub">ART PROTOCOL</span>
+          </span>
+        </a>
+        <div className="header-right">
+          <span className={`live-label ${source ? 'connected' : ''}`}>
+            <i />
+            {status}
+          </span>
+          <button
+            type="button"
+            ref={toggle}
+            className="round-button"
+            onClick={() => setOpen(!open)}
+            aria-label="Tune artwork"
+            aria-expanded={open}
+            aria-controls="tuning"
+          >
+            ☷
+          </button>
         </div>
-      )}
-      <button
-        type="button"
-        className="toggle"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-      >
-        {open ? 'Hide controls' : 'Controls'}
-      </button>
-      <aside className="panel" hidden={!open} aria-label="Signal controls">
-        <header>
-          <h1>Ambient Art Protocol</h1>
-          <p>
-            Tap the canvas to pulse, drag to steer the current. Switch on a live source or drive the
-            sliders; both emit onto the same bus.
-          </p>
-          <p className="keys">
-            <kbd>space</kbd> pulse · <kbd>1</kbd>–<kbd>{SHADER_MANIFESTS.length}</kbd> theme ·{' '}
-            <kbd>h</kbd> hide · <kbd>f</kbd> fullscreen
-          </p>
-        </header>
-
-        <fieldset>
-          <legend>Live sources</legend>
-          {SOURCE_OPTIONS.map((opt) => {
-            const s = status[opt.id] ?? 'idle';
-            return (
-              <label key={opt.id} className="source" title={opt.description}>
-                <input
-                  id={`source-${opt.id}`}
-                  type="checkbox"
-                  checked={sources[opt.id] ?? false}
-                  onChange={(e) => toggleSource(opt.id, e.target.checked)}
-                />
-                <span className="source-name">{opt.name}</span>
-                <span className={`status status-${s}`}>{STATUS_LABEL[s]}</span>
-              </label>
-            );
-          })}
-        </fieldset>
-
-        <label>
-          <span>Theme</span>
-          <select id="theme" value={theme} onChange={(e) => setTheme(e.target.value)}>
+      </header>
+      <div className="art-caption chrome">
+        <span className="eyebrow">
+          {String(SHADER_MANIFESTS.findIndex((m) => m.id === theme) + 1).padStart(2, '0')} /
+          GENERATIVE STUDIES
+        </span>
+        <h1>{active?.name}</h1>
+        <p>{active?.description}</p>
+      </div>
+      <footer className="bottom chrome">
+        <nav className="collection" aria-label="Artwork collection">
+          {COLLECTION.map((m, i) => (
+            <button
+              type="button"
+              key={m.id}
+              className={theme === m.id ? 'selected' : ''}
+              aria-pressed={theme === m.id}
+              onClick={() => selectTheme(m.id)}
+            >
+              <span className="scene-number">0{i + 1}</span>
+              {m.name}
+              <span className="selected-dot" />
+            </button>
+          ))}
+        </nav>
+        <div className="transport">
+          <span className="gesture-hint">Hold to gather · release to resonate</span>
+          <button
+            type="button"
+            className="round-button"
+            onClick={pause}
+            aria-label={paused ? 'Play animation' : 'Pause animation'}
+          >
+            {paused ? '▷' : 'Ⅱ'}
+          </button>
+          <button
+            type="button"
+            className="round-button fullscreen"
+            onClick={fullscreen}
+            aria-label="Fullscreen"
+          >
+            ⛶
+          </button>
+        </div>
+      </footer>
+      <aside ref={panel} id="tuning" className="panel" hidden={!open} aria-label="Tune artwork">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">ART DIRECTION</span>
+            <h2>Make it yours.</h2>
+          </div>
+          <button
+            type="button"
+            className="round-button"
+            aria-label="Close controls"
+            onClick={() => {
+              setOpen(false);
+              toggle.current?.focus();
+            }}
+          >
+            ×
+          </button>
+        </div>
+        <label className="select-label">
+          Scene
+          <select value={theme} onChange={(e) => selectTheme(e.target.value)}>
             {SHADER_MANIFESTS.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
@@ -254,79 +291,114 @@ export function App() {
             ))}
           </select>
         </label>
-
-        <fieldset>
-          <legend>Ambiance</legend>
-          <Slider id="mood" label="Mood" value={mood} onChange={setMood} />
-          <Slider id="turbulence" label="Turbulence" value={turbulence} onChange={setTurbulence} />
-        </fieldset>
-
-        <fieldset>
-          <legend>Current</legend>
-          <Slider id="cx" label="Direction X" value={cx} onChange={setCx} />
-          <Slider id="cy" label="Direction Y" value={cy} onChange={setCy} />
-          <Slider id="velocity" label="Velocity" value={velocity} onChange={setVelocity} />
-        </fieldset>
-
-        <fieldset>
-          <legend>Look</legend>
-          <label className="check">
-            <input
-              id="post"
-              type="checkbox"
-              checked={postOn}
-              onChange={(e) => setPostOn(e.target.checked)}
-            />
-            <span className="source-name">Post FX (bloom, grain, tonemap)</span>
-          </label>
-          <Slider id="bloom" label="Bloom" value={bloom} onChange={setBloom} />
-          <Slider id="grain" label="Grain" value={grain} onChange={setGrain} />
-          <label>
-            <span>Quality</span>
-            <select
-              id="quality"
-              value={quality}
-              onChange={(e) => setQuality(e.target.value as QualityMode)}
+        <fieldset className="palette">
+          <legend>Palette</legend>
+          {PALETTES.map((p) => (
+            <button
+              type="button"
+              key={p.name}
+              className={mood === p.value ? 'chosen' : ''}
+              aria-pressed={mood === p.value}
+              onClick={() => {
+                setMood(p.value);
+                stage.current?.setAmbiance(p.value, 0.2);
+              }}
             >
-              <option value="auto">Auto (adapts to frame rate)</option>
-              <option value="high">High</option>
-              <option value="low">Low (mobile)</option>
+              <i style={{ background: p.color }} />
+              {p.name}
+            </button>
+          ))}
+        </fieldset>
+        <Slider
+          label="Form"
+          value={form}
+          onChange={(v) => {
+            setForm(v);
+            if (stage.current) {
+              stage.current.form = v;
+              stage.current.invalidate();
+            }
+          }}
+        />
+        <Slider
+          label="Motion"
+          value={motion}
+          onChange={(v) => {
+            setMotion(v);
+            if (stage.current) stage.current.clock.motion = v;
+          }}
+        />
+        <Slider
+          label="Glow"
+          value={bloom}
+          onChange={(v) => {
+            setBloom(v);
+            stage.current?.setPost({ bloom: v });
+          }}
+        />
+        <label className="select-label">
+          Driven by
+          <select value={source} disabled={capture} onChange={(e) => changeSource(e.target.value)}>
+            <option value="">Autonomous motion</option>
+            {SOURCE_OPTIONS.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.id === 'mock' ? 'Demo signals (simulated)' : s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <details>
+          <summary>Studio settings</summary>
+          <label className="select-label">
+            Quality
+            <select
+              value={quality}
+              onChange={(e) => {
+                const q = e.target.value as QualityMode;
+                setQuality(q);
+                stage.current?.setQualityMode(q);
+              }}
+            >
+              <option value="auto">Adaptive</option>
+              <option value="high">Full detail</option>
+              <option value="low">Lightweight</option>
             </select>
           </label>
-        </fieldset>
-
-        <button type="button" id="pulse" onClick={() => stageRef.current?.pulse(1)}>
-          Pulse
-        </button>
-
-        {readout && (
-          <dl className="readout" aria-live="off">
-            <dt>fps</dt>
-            <dd>
-              {readout.fps.toFixed(0)} · {readout.quality} @ {readout.renderScale.toFixed(2)}
-              {readout.hdr ? ' · hdr' : ' · 8-bit'}
-            </dd>
-            <dt>mood</dt>
-            <dd>{f(readout.mood)}</dd>
-            <dt>turb</dt>
-            <dd>{f(readout.turbulence)}</dd>
-            <dt>current</dt>
-            <dd>{readout.current.map(f).join(' ')}</dd>
-            <dt>pulse</dt>
-            <dd>
-              {f(readout.pulse)} ({readout.livePulses} live)
-            </dd>
-            <dt>energy</dt>
-            <dd>{f(readout.energy)}</dd>
-          </dl>
-        )}
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => {
+              const p = stage.current?.resetLook();
+              if (p) setBloom(p.bloom);
+            }}
+          >
+            Reset scene lighting
+          </button>
+          {readout && (
+            <p className="readout">
+              {readout.fps.toFixed(0)} fps · {readout.quality} · {readout.hdr ? 'HDR' : 'standard'}
+            </p>
+          )}
+          <p className="shortcuts">1–6 scenes · P pause · F fullscreen · Space pulse</p>
+        </details>
+        <p className="panel-note">Real-time light. No two moments alike.</p>
       </aside>
-    </>
+      {error && (
+        <div className="error" role="alert">
+          {error}
+          <button type="button" onClick={() => setError(null)} aria-label="Dismiss error">
+            ×
+          </button>
+        </div>
+      )}
+    </main>
   );
 }
-
-function Slider(props: {
-  id: string;
+function Slider({
+  label,
+  value,
+  onChange,
+}: {
   label: string;
   value: number;
   onChange: (v: number) => void;
@@ -334,16 +406,16 @@ function Slider(props: {
   return (
     <label className="slider">
       <span>
-        {props.label} <output>{f(props.value)}</output>
+        {label}
+        <output>{Math.round(value * 100)}%</output>
       </span>
       <input
-        id={props.id}
         type="range"
-        min={0}
-        max={1}
-        step={0.01}
-        value={props.value}
-        onChange={(e) => props.onChange(Number(e.target.value))}
+        min="0"
+        max="1"
+        step="0.01"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
       />
     </label>
   );

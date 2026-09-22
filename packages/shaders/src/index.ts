@@ -7,13 +7,18 @@
  */
 import type { ShaderManifest } from '@ambient/sdk';
 import { auroraDrift } from './aurora-drift.js';
+import { chromaticInk } from './chromatic-ink.js';
 import { cyberneticMesh } from './cybernetic-mesh.js';
+import { livingFilaments, resonantSilk } from './filaments.js';
 import { fluidField } from './fluid-field.js';
 
 export * from './lib/glsl.js';
-export { auroraDrift, cyberneticMesh, fluidField };
+export { auroraDrift, chromaticInk, cyberneticMesh, fluidField, livingFilaments, resonantSilk };
 
 export const SHADER_MANIFESTS: readonly ShaderManifest[] = [
+  livingFilaments,
+  chromaticInk,
+  resonantSilk,
   auroraDrift,
   fluidField,
   cyberneticMesh,

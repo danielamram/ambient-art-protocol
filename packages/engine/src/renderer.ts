@@ -123,6 +123,14 @@ export class CanvasRenderer {
   #renderScale: number;
   #shaderQuality: ShaderQuality;
   #lost = false;
+  #geometry: Pass | undefined;
+  #form = 0.45;
+  #pointer: readonly [number, number, number] = [0.5, 0.5, 0];
+  #display: RenderTarget | undefined;
+  #outgoing: RenderTarget | undefined;
+  #present: Pass | undefined;
+  #transition = 2;
+  #hasFrame = false;
   readonly #onLost = (e: Event): void => {
     e.preventDefault();
     this.#lost = true;
@@ -184,10 +192,31 @@ export class CanvasRenderer {
   }
 
   /** Compile and switch to a new theme. On failure the previous program stays active. */
-  setShader(manifest: ShaderManifest): void {
+  setShader(manifest: ShaderManifest, preserveHistory = false): void {
     const gl = this.gl;
     const program = this.#link(VERTEX_SHADER, assembleFragment(manifest.fragment, this.#defines()));
+    let geometry: Pass | undefined;
+    try {
+      if (manifest.geometry) {
+        const src = manifest.geometry.vertex.replace(
+          '#version 300 es',
+          `#version 300 es\n#define AAP_QUALITY ${this.#shaderQuality}`,
+        );
+        const gp = this.#link(src, assembleFragment(manifest.geometry.fragment, this.#defines()));
+        geometry = { program: gp, loc: this.#locations(gp, STANDARD_UNIFORMS) };
+      }
+    } catch (error) {
+      gl.deleteProgram(program);
+      throw error;
+    }
+    if (!preserveHistory && this.#hasFrame && this.#display && this.#outgoing) {
+      // Freeze the displayed composition; only the incoming scene runs during a dissolve.
+      this.#blit(this.#display, this.#outgoing);
+      this.#transition = 0;
+    }
     if (this.#program) gl.deleteProgram(this.#program);
+    if (this.#geometry) gl.deleteProgram(this.#geometry.program);
+    this.#geometry = geometry;
     this.#program = program;
     this.#manifest = manifest;
     gl.useProgram(program);
@@ -195,7 +224,7 @@ export class CanvasRenderer {
     const prev = this.#loc.u_prevFrame;
     if (prev) gl.uniform1i(prev, 0);
     // A new theme must not inherit the old one's last frame as a bright flash.
-    if (this.#scene) for (const t of this.#scene) t.clear();
+    if (!preserveHistory && this.#scene) for (const t of this.#scene) t.clear();
     this.#settings = normalizePost(manifest.post, this.#override, { hdr: this.#format.hdr });
   }
 
@@ -225,8 +254,14 @@ export class CanvasRenderer {
   /** Recompile the theme with a different `AAP_QUALITY` define. */
   setShaderQuality(q: ShaderQuality): void {
     if (q === this.#shaderQuality) return;
+    const previous = this.#shaderQuality;
     this.#shaderQuality = q;
-    this.setShader(this.#manifest);
+    try {
+      this.setShader(this.#manifest, true);
+    } catch (error) {
+      this.#shaderQuality = previous;
+      throw error;
+    }
   }
 
   /** Match the drawing buffer to the canvas's CSS size times devicePixelRatio. Returns [w, h]. */
@@ -244,7 +279,16 @@ export class CanvasRenderer {
     return [w, h];
   }
 
-  render(state: UniformState): void {
+  get transitioning(): boolean {
+    return this.#transition < 1.6;
+  }
+
+  setArt(form: number, pointer: readonly [number, number, number]): void {
+    this.#form = Math.max(0, Math.min(1, form));
+    this.#pointer = pointer;
+  }
+
+  render(state: UniformState, wallDt = state.u_dt): void {
     if (this.#lost || !this.#program || !this.#post) return;
     const gl = this.gl;
     this.#ensureTargets();
@@ -254,6 +298,20 @@ export class CanvasRenderer {
     const passes = planPasses(this.#settings);
     gl.bindVertexArray(this.#vao);
     for (const pass of passes) this.#draw(pass, state, scene, bloom);
+    this.#transition = Math.min(2, this.#transition + Math.max(0, wallDt));
+    const display = this.#display;
+    const outgoing = this.#outgoing;
+    const present = this.#present;
+    if (display && outgoing && present) {
+      this.#target(null, this.canvas.width, this.canvas.height);
+      gl.useProgram(present.program);
+      this.#bindTexture(0, display.texture);
+      this.#bindTexture(1, outgoing.texture);
+      gl.uniform2f(present.loc.u_resolution ?? null, this.canvas.width, this.canvas.height);
+      gl.uniform1f(present.loc.u_mix ?? null, Math.min(1, this.#transition / 1.6));
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    this.#hasFrame = true;
   }
 
   dispose(): void {
@@ -263,6 +321,10 @@ export class CanvasRenderer {
     this.#releaseTargets();
     if (this.#program) gl.deleteProgram(this.#program);
     if (this.#post) for (const p of Object.values(this.#post)) gl.deleteProgram(p.program);
+    if (this.#geometry) gl.deleteProgram(this.#geometry.program);
+    if (this.#present) gl.deleteProgram(this.#present.program);
+    this.#geometry = undefined;
+    this.#present = undefined;
     if (this.#vao) gl.deleteVertexArray(this.#vao);
     this.#program = undefined;
     this.#post = undefined;
@@ -292,6 +354,27 @@ export class CanvasRenderer {
       }
       return { program, loc };
     };
+    const presentProgram = this.#link(
+      VERTEX_SHADER,
+      assembleFragment(`
+      uniform sampler2D u_scene;
+      uniform sampler2D u_old;
+      uniform vec2 u_resolution;
+      uniform float u_mix;
+      void main() {
+        vec2 uv = gl_FragCoord.xy / u_resolution;
+        float t = smoothstep(0.0, 1.0, u_mix);
+        fragColor = vec4(mix(texture(u_old, uv).rgb, texture(u_scene, uv).rgb, t), 1.0);
+      }
+    `),
+    );
+    this.#present = {
+      program: presentProgram,
+      loc: this.#locations(presentProgram, ['u_scene', 'u_old', 'u_resolution', 'u_mix']),
+    };
+    gl.useProgram(presentProgram);
+    gl.uniform1i(this.#present.loc.u_scene ?? null, 0);
+    gl.uniform1i(this.#present.loc.u_old ?? null, 1);
     this.#post = {
       bright: make(BRIGHT_PASS_FRAGMENT, { u_scene: 0 }),
       blur: make(BLUR_FRAGMENT, { u_src: 0 }),
@@ -306,6 +389,11 @@ export class CanvasRenderer {
     this.#lost = false;
     this.#scene = undefined;
     this.#bloom = undefined;
+    this.#display = undefined;
+    this.#outgoing = undefined;
+    this.#geometry = undefined;
+    this.#hasFrame = false;
+    this.#transition = 2;
     this.#targetsKey = '';
     this.#program = undefined;
     this.#post = undefined;
@@ -328,9 +416,12 @@ export class CanvasRenderer {
       renderScale: this.#renderScale,
       maxTextureSize: this.#maxTextureSize,
     });
-    const key = `${plan.scene[0]}x${plan.scene[1]}|${plan.bloom[0]}x${plan.bloom[1]}|${this.#format.hdr}`;
+    const key = `${plan.scene[0]}x${plan.scene[1]}|${plan.bloom[0]}x${plan.bloom[1]}|${this.#format.hdr}|${this.canvas.width}x${this.canvas.height}`;
     if (key === this.#targetsKey && this.#scene && this.#bloom) return;
-    this.#releaseTargets();
+    const oldScene = this.#scene;
+    const oldBloom = this.#bloom;
+    const oldDisplay = this.#display;
+    const oldOutgoing = this.#outgoing;
     const gl = this.gl;
     const mk = (w: number, h: number) => new RenderTarget(gl, w, h, this.#format);
     let scene: [RenderTarget, RenderTarget] = [
@@ -349,17 +440,67 @@ export class CanvasRenderer {
       scene = [mk(plan.scene[0], plan.scene[1]), mk(plan.scene[0], plan.scene[1])];
       this.#settings = normalizePost(this.#manifest.post, this.#override, { hdr: false });
     }
+    if (oldScene) {
+      this.#blit(oldScene[this.#read] as RenderTarget, scene[0]);
+      this.#blit(oldScene[this.#read] as RenderTarget, scene[1]);
+      for (const target of oldScene) target.dispose();
+    }
+    if (oldBloom) for (const target of oldBloom) target.dispose();
+    const displayFormat: ColorFormat = {
+      internalFormat: gl.RGBA8,
+      format: gl.RGBA,
+      type: gl.UNSIGNED_BYTE,
+      hdr: false,
+    };
+    this.#display = new RenderTarget(gl, this.canvas.width, this.canvas.height, displayFormat);
+    this.#outgoing = new RenderTarget(gl, this.canvas.width, this.canvas.height, displayFormat);
+    if (oldDisplay) {
+      this.#blit(oldDisplay, this.#display);
+      oldDisplay.dispose();
+    }
+    if (oldOutgoing) {
+      this.#blit(oldOutgoing, this.#outgoing);
+      oldOutgoing.dispose();
+    }
     this.#scene = scene;
     this.#bloom = [mk(plan.bloom[0], plan.bloom[1]), mk(plan.bloom[0], plan.bloom[1])];
     this.#read = 0;
     this.#targetsKey = key;
   }
 
+  #blit(from: RenderTarget, to: RenderTarget): void {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from.fbo);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, to.fbo);
+    gl.blitFramebuffer(
+      0,
+      0,
+      from.width,
+      from.height,
+      0,
+      0,
+      to.width,
+      to.height,
+      gl.COLOR_BUFFER_BIT,
+      gl.LINEAR,
+    );
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
   #releaseTargets(): void {
     if (this.#scene) for (const t of this.#scene) t.dispose();
     if (this.#bloom) for (const t of this.#bloom) t.dispose();
+    this.#display?.dispose();
+    this.#outgoing?.dispose();
+    this.#display = undefined;
+    this.#outgoing = undefined;
     this.#scene = undefined;
     this.#bloom = undefined;
+    this.#display = undefined;
+    this.#outgoing = undefined;
+    this.#geometry = undefined;
+    this.#hasFrame = false;
+    this.#transition = 2;
     this.#targetsKey = '';
   }
 
@@ -395,6 +536,21 @@ export class CanvasRenderer {
         this.#setSceneUniforms(state, write.width, write.height);
         this.#bindTexture(0, read.texture);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
+        const geo = this.#geometry;
+        const definition = this.#manifest.geometry;
+        if (geo && definition) {
+          gl.useProgram(geo.program);
+          this.#setSceneUniforms(state, write.width, write.height, geo.loc);
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.ONE, gl.ONE);
+          gl.drawArraysInstanced(
+            gl.TRIANGLES,
+            0,
+            6,
+            this.#shaderQuality > 0 ? definition.instances : definition.lowInstances,
+          );
+          gl.disable(gl.BLEND);
+        }
         this.#read = 1 - this.#read;
         break;
       }
@@ -428,7 +584,7 @@ export class CanvasRenderer {
       }
       case 'composite': {
         const src = scene[this.#read] as RenderTarget;
-        this.#target(null, this.canvas.width, this.canvas.height);
+        this.#target(this.#display?.fbo ?? null, this.canvas.width, this.canvas.height);
         const p = s.enabled ? post.composite : post.copy;
         gl.useProgram(p.program);
         const l = p.loc;
@@ -449,9 +605,10 @@ export class CanvasRenderer {
     }
   }
 
-  #setSceneUniforms(state: UniformState, width: number, height: number): void {
+  #setSceneUniforms(state: UniformState, width: number, height: number, loc = this.#loc): void {
     const gl = this.gl;
-    const loc = this.#loc;
+    if (loc.u_form) gl.uniform1f(loc.u_form, this.#form);
+    if (loc.u_pointer) gl.uniform3f(loc.u_pointer, ...this.#pointer);
     if (loc.u_time) gl.uniform1f(loc.u_time, state.u_time);
     if (loc.u_resolution) gl.uniform2f(loc.u_resolution, width, height);
     if (loc.u_pulse) gl.uniform1f(loc.u_pulse, state.u_pulse);
@@ -482,7 +639,13 @@ export class CanvasRenderer {
   #link(vertexSrc: string, fragmentSrc: string): WebGLProgram {
     const gl = this.gl;
     const vs = this.#compile('vertex', vertexSrc);
-    const fs = this.#compile('fragment', fragmentSrc);
+    let fs: WebGLShader;
+    try {
+      fs = this.#compile('fragment', fragmentSrc);
+    } catch (error) {
+      gl.deleteShader(vs);
+      throw error;
+    }
     const program = gl.createProgram();
     if (!program) throw new ShaderCompileError('link', 'createProgram returned null');
     gl.attachShader(program, vs);
