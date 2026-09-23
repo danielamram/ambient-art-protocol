@@ -131,6 +131,11 @@ export class AmbientStage {
     }
   }
 
+  /** True for `?capture` URLs: fixed shader time, forced quality, no live sources. */
+  get captureMode(): boolean {
+    return this.#captureTime !== undefined;
+  }
+
   setPaused(paused: boolean): void {
     this.clock.paused = paused;
     this.#onVisibility();
