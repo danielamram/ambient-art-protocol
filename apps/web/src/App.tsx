@@ -1,196 +1,338 @@
+import type { SourceStatus } from '@ambient/sdk';
 import { SHADER_MANIFESTS } from '@ambient/shaders';
 import { useEffect, useRef, useState } from 'react';
-import { AmbientStage, type QualityMode, type Readout, SOURCE_OPTIONS } from './ambient.js';
+import { type Readout, SOURCE_OPTIONS } from './ambient.js';
+import { Diagnostics } from './components/Diagnostics.js';
+import { NoticeRegion } from './components/NoticeRegion.js';
+import { SavedLooks } from './components/SavedLooks.js';
+import { PHASE_LABEL, SourcePicker } from './components/SourcePicker.js';
+import { TuningPanel } from './components/TuningPanel.js';
+import { useAmbientStage } from './hooks/use-ambient-stage.js';
+import { useCanvasPointer } from './hooks/use-canvas-pointer.js';
+import { useIdleChrome, useShortcuts } from './hooks/use-experience-controls.js';
+import { useFullscreen } from './hooks/use-fullscreen.js';
+import { useNotices } from './hooks/use-notices.js';
+import { useSavedLooks } from './hooks/use-saved-looks.js';
+import { useSourceSelection } from './hooks/use-source-selection.js';
+import { applySettings } from './state/apply-settings.js';
+import {
+  type ArtworkSettingsV1,
+  DEFAULT_DEVICE,
+  type PaletteId,
+  paletteOf,
+  type QualityMode,
+  resetArtwork,
+  settingsEqual,
+  withScene,
+} from './state/artwork-settings.js';
+import { diagnosticsReport } from './state/diagnostics.js';
+import {
+  ADJUSTED_NOTICE,
+  decodeLookFragment,
+  resolveStartup,
+  shareUrl,
+} from './state/look-codec.js';
+import {
+  browserStore,
+  newLookId,
+  normalizeName,
+  readDevicePreferences,
+  readLastLook,
+  type SavedLookV1,
+  STORAGE_KEYS,
+  writeJson,
+} from './state/look-storage.js';
+import { copyText, type ShareEnvironment, shareLink } from './state/share.js';
 
 const COLLECTION = SHADER_MANIFESTS.slice(0, 3);
-const PALETTES = [
-  { name: 'Glacier', value: 0, color: '#9adfcd' },
-  { name: 'Ember', value: 0.5, color: '#e8a26a' },
-  { name: 'Iris', value: 1, color: '#b7a0ec' },
-];
-const initialTheme = (): string => {
-  const id = new URLSearchParams(location.search).get('scene');
-  return SHADER_MANIFESTS.find((m) => m.id === id)?.id ?? 'living-filaments';
-};
-const editable = (target: EventTarget | null) =>
-  target instanceof HTMLElement &&
-  (target.isContentEditable || /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(target.tagName));
+const LAST_LOOK_DEBOUNCE_MS = 400;
+const NOT_SAVED =
+  'Changes could not be saved on this device. They will last until this tab closes.';
+/** Bound navigator methods: calling an unbound `navigator.share` throws. */
+const shareEnvironment = (): ShareEnvironment => ({
+  ...(typeof navigator.share === 'function' ? { share: (d) => navigator.share(d) } : {}),
+  ...(navigator.clipboard ? { clipboard: navigator.clipboard } : {}),
+});
+
+/** Everything decided once, before the stage exists. */
+function boot() {
+  const capture = new URLSearchParams(location.search).has('capture');
+  const store = browserStore(() => window.localStorage);
+  const startup = resolveStartup({
+    search: location.search,
+    hash: location.hash,
+    // Capture mode bypasses anything saved on this device.
+    stored: capture ? null : readLastLook(store, SHADER_MANIFESTS),
+    scenes: SHADER_MANIFESTS,
+  });
+  const device = capture ? DEFAULT_DEVICE : (readDevicePreferences(store) ?? DEFAULT_DEVICE);
+  return { capture, store, startup, device };
+}
 
 export function App() {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const stage = useRef<AmbientStage | null>(null);
   const panel = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
-  const pointer = useRef<number | null>(null);
-  const sourceChange = useRef(Promise.resolve());
-  const [theme, setTheme] = useState(initialTheme);
+  const main = useRef<HTMLElement>(null);
+  const [{ capture, store, startup, device }] = useState(boot);
+  const [initial] = useState(() => ({ settings: startup.settings, quality: device.quality }));
+  const [settings, setSettings] = useState<ArtworkSettingsV1>(initial.settings);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  /** Only user-initiated changes are remembered as the last look, never startup fallbacks. */
+  const userChanged = useRef(false);
+  const [glow, setGlow] = useState(0.28);
+  const [quality, setQuality] = useState<QualityMode>(initial.quality);
+  const [loadedId, setLoadedId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  const [idle, setIdle] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [mood, setMood] = useState(0);
-  const [form, setForm] = useState(0.45);
-  const [motion, setMotion] = useState(0.45);
-  const [bloom, setBloom] = useState(0.28);
-  const [quality, setQuality] = useState<QualityMode>('auto');
-  const [source, setSource] = useState('');
-  const [status, setStatus] = useState('Autonomous');
   const [readout, setReadout] = useState<Readout | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const capture = new URLSearchParams(location.search).has('capture');
-  const active = SHADER_MANIFESTS.find((m) => m.id === theme) ?? SHADER_MANIFESTS[0];
+  const { notice, notify, dismiss } = useNotices(!capture);
+  const saved = useSavedLooks(store, SHADER_MANIFESTS, notify);
+  const active = SHADER_MANIFESTS.find((m) => m.id === settings.scene) ?? SHADER_MANIFESTS[0];
 
+  const sourceStatus = useRef<(id: string, s: SourceStatus) => void>(() => undefined);
+  const { handle, mounted } = useAmbientStage(canvas, initial, {
+    onReadout: setReadout,
+    onError: setError,
+    onSourceStatus: (id, s) => sourceStatus.current(id, s),
+  });
+  const sources = useSourceSelection(handle, mounted, () => {
+    // Autonomous: the overlay's own signals again, from the settings selected *now*.
+    const h = handle.current;
+    h?.art.setPalette(paletteOf(settingsRef.current.palette).mood);
+    h?.stage.setCurrent(0.5, 0.5, 0);
+  });
+  sourceStatus.current = sources.onStatus;
   useEffect(() => {
-    if (!canvas.current) return;
-    let instance: AmbientStage;
-    try {
-      instance = new AmbientStage(canvas.current);
-      stage.current = instance;
-      instance.setAmbiance(0, 0.2);
-      instance.setTheme(initialTheme());
-      setBloom(instance.post.bloom);
-      instance.onReadout(setReadout);
-      instance.onError(setError);
-      instance.onSourceStatus((_id, s) =>
-        setStatus(
-          s === 'running'
-            ? 'Live signal'
-            : s === 'error'
-              ? 'Source unavailable'
-              : s === 'starting'
-                ? 'Connecting'
-                : 'Autonomous',
-        ),
+    if (!mounted) return;
+    setSettings(mounted.settings);
+    setGlow(mounted.glow);
+  }, [mounted]);
+  useEffect(() => {
+    if (startup.notice) notify(startup.notice);
+  }, [startup, notify]);
+
+  // Remember the last look, debounced, and flush when the page is hidden.
+  useEffect(() => {
+    if (capture || !userChanged.current) return;
+    let written = false;
+    const write = () => {
+      if (written) return;
+      written = true;
+      if (!writeJson(store, STORAGE_KEYS.lastLook, settingsRef.current) && store) notify(NOT_SAVED);
+    };
+    const timer = window.setTimeout(write, LAST_LOOK_DEBOUNCE_MS);
+    window.addEventListener('pagehide', write);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('pagehide', write);
+    };
+  }, [settings, capture, store, notify]);
+
+  const idle = useIdleChrome(main, !capture);
+  const pointer = useCanvasPointer(handle);
+  const fullscreen = useFullscreen(notify);
+
+  /** Apply a complete look through the one ordered path; UI changes only after the stage agrees. */
+  const applyLook = (next: ArtworkSettingsV1): boolean => {
+    const h = handle.current;
+    if (!h) return false;
+    const result = applySettings(h.art, next, settingsRef.current);
+    if (!result.ok) {
+      notify(
+        result.reason === 'scene'
+          ? 'That scene could not be shown, so the current look was kept.'
+          : 'That look could not be applied, so the current look was kept.',
       );
-      instance.start();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      return;
+      return false;
     }
-    return () => {
-      stage.current = null;
-      instance.dispose();
-    };
-  }, []);
-
-  useEffect(() => {
-    let timer = 0;
-    const wake = () => {
-      setIdle(false);
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        if (!panel.current?.contains(document.activeElement)) setIdle(true);
-      }, 7000);
-    };
-    for (const event of ['pointermove', 'pointerdown', 'keydown', 'focusin'])
-      window.addEventListener(event, wake);
-    wake();
-    return () => {
-      window.clearTimeout(timer);
-      for (const event of ['pointermove', 'pointerdown', 'keydown', 'focusin'])
-        window.removeEventListener(event, wake);
-    };
-  }, []);
-
-  const selectTheme = (id: string) => {
-    const s = stage.current;
-    if (!s?.setTheme(id)) return;
-    s.setPaused(false);
-    setPaused(false);
-    setTheme(id);
-    setBloom(s.resetLook().bloom);
-    setError(null);
+    // Updated now, not on the next render: a settling source coordinator reads it.
+    settingsRef.current = next;
+    userChanged.current = true;
+    setSettings(next);
+    setGlow(result.glow);
+    return true;
   };
+  /**
+   * Load a saved or shared look. A live source is returned to Autonomous first: selecting
+   * Autonomous aborts the source synchronously, so no late event can override the look.
+   */
+  const loadLook = (next: ArtworkSettingsV1, id: string | null, message?: string) => {
+    const hadSource = sources.view.selected !== '';
+    if (hadSource) void sources.select('');
+    if (!applyLook(next)) return false;
+    setLoadedId(id);
+    const parts = [message, hadSource ? 'Live source stopped; back to Autonomous.' : undefined];
+    const text = parts.filter(Boolean).join(' ');
+    if (text) notify(text);
+    return true;
+  };
+  const selectScene = (id: string) => {
+    if (id !== settingsRef.current.scene) applyLook(withScene(settingsRef.current, id));
+  };
+  const update = (patch: Partial<ArtworkSettingsV1>, write: () => void) => {
+    write();
+    userChanged.current = true;
+    const next = { ...settingsRef.current, ...patch };
+    settingsRef.current = next;
+    setSettings(next);
+  };
+  const setPalette = (palette: PaletteId) =>
+    update({ palette }, () => handle.current?.art.setPalette(paletteOf(palette).mood));
+  const setForm = (form: number) => update({ form }, () => handle.current?.art.setForm(form));
+  const setMotion = (motion: number) =>
+    update({ motion }, () => handle.current?.art.setMotion(motion));
+  const setGlowOverride = (value: number) =>
+    update({ glow: value }, () => {
+      const g = handle.current?.art.setGlow(value);
+      if (g !== undefined) setGlow(g);
+    });
+  const resetLighting = () => {
+    const g = handle.current?.art.clearLighting();
+    if (g === undefined) return;
+    setGlow(g);
+    update({ glow: null }, () => undefined);
+  };
+  const changeQuality = (q: QualityMode) => {
+    setQuality(q);
+    handle.current?.stage.setQualityMode(q);
+    if (!writeJson(store, STORAGE_KEYS.device, { version: 1, quality: q }) && store) {
+      notify(NOT_SAVED);
+    }
+  };
+
+  // Shared links opened while the app is running (paste, back/forward). Nothing here writes the
+  // hash, so applying a link can never trigger another hashchange.
+  const onHash = useRef<() => void>(() => undefined);
+  onHash.current = () => {
+    const decoded = decodeLookFragment(location.hash, SHADER_MANIFESTS);
+    if (decoded.kind === 'invalid') {
+      notify('That link’s look could not be read, so nothing was changed.');
+    } else if (decoded.kind === 'ok' && !settingsEqual(decoded.settings, settingsRef.current)) {
+      loadLook(
+        decoded.settings,
+        null,
+        decoded.adjusted ? `Opened a shared look. ${ADJUSTED_NOTICE}` : 'Opened a shared look.',
+      );
+    }
+  };
+  useEffect(() => {
+    if (capture) return;
+    const listener = () => onHash.current();
+    window.addEventListener('hashchange', listener);
+    return () => window.removeEventListener('hashchange', listener);
+  }, [capture]);
+
+  // Saved looks.
+  const now = () => new Date().toISOString();
+  const persisted = (result: ReturnType<typeof saved.mutate>, done: string): boolean => {
+    if (!result.ok) {
+      notify(
+        result.reason === 'limit'
+          ? 'You already have 30 saved looks. Delete one or update an existing look.'
+          : result.reason === 'name'
+            ? 'Give the look a name first.'
+            : 'That look is no longer saved here; the list has been refreshed.',
+      );
+      return false;
+    }
+    notify(result.durable ? done : `${done} ${NOT_SAVED}`);
+    return true;
+  };
+  const saveLook = (rawName: string): boolean => {
+    const name = normalizeName(rawName);
+    if (name === null) {
+      notify('Give the look a name first.');
+      return false;
+    }
+    const at = now();
+    const look: SavedLookV1 = {
+      id: newLookId(),
+      name,
+      createdAt: at,
+      updatedAt: at,
+      settings: settingsRef.current,
+    };
+    const ok = persisted(saved.mutate({ type: 'create', look }), 'Look saved.');
+    if (ok) setLoadedId(look.id);
+    return ok;
+  };
+  const deleteLook = (id: string) => {
+    const index = saved.looks.findIndex((l) => l.id === id);
+    const look = saved.looks[index];
+    const result = saved.mutate({ type: 'delete', id });
+    if (!result.ok || !look) return void persisted(result, '');
+    if (loadedId === id) setLoadedId(null);
+    notify(`Deleted “${look.name}”.`, {
+      label: 'Undo',
+      run: () => {
+        persisted(saved.mutate({ type: 'restore', look, index }), 'Look restored.');
+        dismiss();
+      },
+    });
+  };
+
+  // Focus follows the panel: into its heading on open, back to the opener on close, but only
+  // if focus was inside the panel, so closing never steals focus from elsewhere.
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpen.current) heading.current?.focus({ preventScroll: true });
+    wasOpen.current = open;
+  }, [open]);
+  const setPanelOpen = (next: boolean) => {
+    if (!next && panel.current?.contains(document.activeElement)) {
+      toggle.current?.focus({ preventScroll: true });
+    }
+    setOpen(next);
+  };
+  const setPanelOpenRef = useRef(setPanelOpen);
+  setPanelOpenRef.current = setPanelOpen;
+  // Escape closes the panel, the only app overlay, and is left alone while it is closed.
+  // Inline forms inside the panel stop Escape first, to cancel just themselves.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      setPanelOpenRef.current(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
   const pause = () => {
-    const s = stage.current;
+    const s = handle.current?.stage;
     if (!s) return;
     s.setPaused(!s.clock.paused);
     setPaused(s.clock.paused);
   };
-  const fullscreen = () => {
-    const action = document.fullscreenElement
-      ? document.exitFullscreen?.()
-      : document.documentElement.requestFullscreen?.();
-    void action?.catch(() => setError('Fullscreen is not available in this browser.'));
-  };
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setOpen(false);
-        toggle.current?.focus();
-        return;
-      }
-      if (editable(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === ' ') {
-        e.preventDefault();
-        stage.current?.pulse(0.65);
-      } else if (e.key.toLowerCase() === 'p') pause();
-      else if (e.key.toLowerCase() === 'h') setOpen((v) => !v);
-      else if (e.key.toLowerCase() === 'f') fullscreen();
-      else if (/^[1-6]$/.test(e.key)) {
-        const next = SHADER_MANIFESTS[Number(e.key) - 1];
-        if (next) selectTheme(next.id);
-      }
-    };
-    window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
-  });
-
-  const position = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return {
-      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
-    };
-  };
-  const release = (e: React.PointerEvent<HTMLCanvasElement>, pulse: boolean) => {
-    if (pointer.current !== e.pointerId) return;
-    pointer.current = null;
-    const p = position(e);
-    stage.current?.setPointer(p.x, p.y, false);
-    if (pulse) stage.current?.pulse(0.7, p);
-    if (e.currentTarget.hasPointerCapture(e.pointerId))
-      e.currentTarget.releasePointerCapture(e.pointerId);
-  };
-  const changeSource = (id: string) => {
-    setSource(id);
-    // Serialize changes: two feeds never compete for the palette/current accidentally.
-    sourceChange.current = sourceChange.current
-      .then(async () => {
-        const s = stage.current;
-        if (!s) return;
-        for (const opt of SOURCE_OPTIONS) await s.setSource(opt.id, false);
-        if (id) await s.setSource(id, true);
-        else {
-          s.setAmbiance(mood, 0.2);
-          s.setCurrent(0.5, 0.5, 0);
-          setStatus('Autonomous');
-        }
-      })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-  };
+  useShortcuts(
+    {
+      pulse: () => handle.current?.stage.pulse(0.65),
+      pause,
+      togglePanel: () => setPanelOpenRef.current(!open),
+      ...(fullscreen.supported ? { fullscreen: fullscreen.toggle } : {}),
+      scene: (index) => {
+        const next = SHADER_MANIFESTS[index];
+        if (next) selectScene(next.id);
+      },
+    },
+    // Capture mode keeps its previous keyboard behavior; it only drops chrome and notices.
+    true,
+  );
 
   return (
-    <main className={`experience ${idle && !open ? 'is-idle' : ''} ${capture ? 'is-capture' : ''}`}>
+    <main
+      ref={main}
+      className={`experience ${idle && !open ? 'is-idle' : ''} ${capture ? 'is-capture' : ''}`}
+    >
       <canvas
         ref={canvas}
         className="stage"
         aria-label="Interactive generative artwork. Hold to gather light, release to send a pulse."
-        onPointerDown={(e) => {
-          if (pointer.current !== null) return;
-          pointer.current = e.pointerId;
-          e.currentTarget.setPointerCapture(e.pointerId);
-          const p = position(e);
-          stage.current?.setPointer(p.x, p.y, true);
-        }}
-        onPointerMove={(e) => {
-          if (pointer.current === e.pointerId) {
-            const p = position(e);
-            stage.current?.setPointer(p.x, p.y, true);
-          }
-        }}
-        onPointerUp={(e) => release(e, true)}
-        onPointerCancel={(e) => release(e, false)}
-        onLostPointerCapture={(e) => release(e, false)}
+        {...pointer}
       />
       <header className="masthead chrome">
         <a className="wordmark" href="./" aria-label="Ambient Art Protocol home">
@@ -202,15 +344,15 @@ export function App() {
           </span>
         </a>
         <div className="header-right">
-          <span className={`live-label ${source ? 'connected' : ''}`}>
+          <span className={`live-label ${sources.view.phase === 'live' ? 'connected' : ''}`}>
             <i />
-            {status}
+            {PHASE_LABEL[sources.view.phase]}
           </span>
           <button
             type="button"
             ref={toggle}
             className="round-button"
-            onClick={() => setOpen(!open)}
+            onClick={() => setPanelOpen(!open)}
             aria-label="Tune artwork"
             aria-expanded={open}
             aria-controls="tuning"
@@ -221,8 +363,8 @@ export function App() {
       </header>
       <div className="art-caption chrome">
         <span className="eyebrow">
-          {String(SHADER_MANIFESTS.findIndex((m) => m.id === theme) + 1).padStart(2, '0')} /
-          GENERATIVE STUDIES
+          {String(SHADER_MANIFESTS.findIndex((m) => m.id === settings.scene) + 1).padStart(2, '0')}{' '}
+          / GENERATIVE STUDIES
         </span>
         <h1>{active?.name}</h1>
         <p>{active?.description}</p>
@@ -233,9 +375,9 @@ export function App() {
             <button
               type="button"
               key={m.id}
-              className={theme === m.id ? 'selected' : ''}
-              aria-pressed={theme === m.id}
-              onClick={() => selectTheme(m.id)}
+              className={settings.scene === m.id ? 'selected' : ''}
+              aria-pressed={settings.scene === m.id}
+              onClick={() => selectScene(m.id)}
             >
               <span className="scene-number">0{i + 1}</span>
               {m.name}
@@ -253,136 +395,106 @@ export function App() {
           >
             {paused ? '▷' : 'Ⅱ'}
           </button>
-          <button
-            type="button"
-            className="round-button fullscreen"
-            onClick={fullscreen}
-            aria-label="Fullscreen"
-          >
-            ⛶
-          </button>
-        </div>
-      </footer>
-      <aside ref={panel} id="tuning" className="panel" hidden={!open} aria-label="Tune artwork">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">ART DIRECTION</span>
-            <h2>Make it yours.</h2>
-          </div>
-          <button
-            type="button"
-            className="round-button"
-            aria-label="Close controls"
-            onClick={() => {
-              setOpen(false);
-              toggle.current?.focus();
-            }}
-          >
-            ×
-          </button>
-        </div>
-        <label className="select-label">
-          Scene
-          <select value={theme} onChange={(e) => selectTheme(e.target.value)}>
-            {SHADER_MANIFESTS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <fieldset className="palette">
-          <legend>Palette</legend>
-          {PALETTES.map((p) => (
+          {fullscreen.supported && (
             <button
               type="button"
-              key={p.name}
-              className={mood === p.value ? 'chosen' : ''}
-              aria-pressed={mood === p.value}
-              onClick={() => {
-                setMood(p.value);
-                stage.current?.setAmbiance(p.value, 0.2);
-              }}
+              className="round-button fullscreen"
+              onClick={fullscreen.toggle}
+              aria-label={fullscreen.active ? 'Exit fullscreen' : 'Fullscreen'}
             >
-              <i style={{ background: p.color }} />
-              {p.name}
+              ⛶
             </button>
-          ))}
-        </fieldset>
-        <Slider
-          label="Form"
-          value={form}
-          onChange={(v) => {
-            setForm(v);
-            if (stage.current) {
-              stage.current.form = v;
-              stage.current.invalidate();
-            }
-          }}
-        />
-        <Slider
-          label="Motion"
-          value={motion}
-          onChange={(v) => {
-            setMotion(v);
-            if (stage.current) stage.current.clock.motion = v;
-          }}
-        />
-        <Slider
-          label="Glow"
-          value={bloom}
-          onChange={(v) => {
-            setBloom(v);
-            stage.current?.setPost({ bloom: v });
-          }}
-        />
-        <label className="select-label">
-          Driven by
-          <select value={source} disabled={capture} onChange={(e) => changeSource(e.target.value)}>
-            <option value="">Autonomous motion</option>
-            {SOURCE_OPTIONS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.id === 'mock' ? 'Demo signals (simulated)' : s.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <details>
-          <summary>Studio settings</summary>
-          <label className="select-label">
-            Quality
-            <select
-              value={quality}
-              onChange={(e) => {
-                const q = e.target.value as QualityMode;
-                setQuality(q);
-                stage.current?.setQualityMode(q);
-              }}
-            >
-              <option value="auto">Adaptive</option>
-              <option value="high">Full detail</option>
-              <option value="low">Lightweight</option>
-            </select>
-          </label>
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => {
-              const p = stage.current?.resetLook();
-              if (p) setBloom(p.bloom);
-            }}
-          >
-            Reset scene lighting
-          </button>
-          {readout && (
-            <p className="readout">
-              {readout.fps.toFixed(0)} fps · {readout.quality} · {readout.hdr ? 'HDR' : 'standard'}
-            </p>
           )}
-          <p className="shortcuts">1–6 scenes · P pause · F fullscreen · Space pulse</p>
-        </details>
-        <p className="panel-note">Real-time light. No two moments alike.</p>
-      </aside>
+        </div>
+      </footer>
+      <TuningPanel
+        open={open}
+        panelRef={panel}
+        headingRef={heading}
+        scenes={SHADER_MANIFESTS}
+        settings={settings}
+        effectiveGlow={glow}
+        quality={quality}
+        onClose={() => setPanelOpen(false)}
+        onScene={selectScene}
+        onPalette={setPalette}
+        onForm={setForm}
+        onMotion={setMotion}
+        onGlow={setGlowOverride}
+        onResetLighting={resetLighting}
+        onResetArtwork={() => applyLook(resetArtwork(settingsRef.current))}
+        onQuality={changeQuality}
+        looks={
+          <SavedLooks
+            looks={saved.looks}
+            scenes={SHADER_MANIFESTS}
+            current={settings}
+            loadedId={loadedId}
+            persistence={saved.persistence}
+            onSave={saveLook}
+            onLoad={(look) => loadLook(look.settings, look.id, `Loaded “${look.name}”.`)}
+            onRename={(id, name) =>
+              persisted(saved.mutate({ type: 'rename', id, name, at: now() }), 'Look renamed.')
+            }
+            onUpdate={(id) => {
+              if (
+                persisted(
+                  saved.mutate({ type: 'update', id, settings: settingsRef.current, at: now() }),
+                  'Look updated.',
+                )
+              )
+                setLoadedId(id);
+            }}
+            onDelete={deleteLook}
+            onShare={async () => {
+              const url = shareUrl(location, settingsRef.current);
+              const outcome = await shareLink(
+                shareEnvironment(),
+                url,
+                `${active?.name ?? 'Ambient'} look`,
+              );
+              if (outcome === 'copied') notify('Link copied.');
+              return { outcome, url };
+            }}
+          />
+        }
+        source={
+          <SourcePicker
+            options={SOURCE_OPTIONS}
+            view={sources.view}
+            disabled={capture}
+            onSelect={(id) => void sources.select(id)}
+            onRetry={() => void sources.retry()}
+          />
+        }
+        diagnostics={
+          <Diagnostics
+            readout={readout}
+            onCopy={async () => {
+              const text = diagnosticsReport({
+                timestamp: new Date().toISOString(),
+                appVersion: __AAP_VERSION__,
+                commit: __AAP_COMMIT__,
+                scene: settingsRef.current.scene,
+                qualityPreference: quality,
+                readout,
+                paused,
+                source: sources.view.selected,
+                viewport: { width: window.innerWidth, height: window.innerHeight },
+                devicePixelRatio: window.devicePixelRatio,
+                reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+                visibility: document.visibilityState,
+                userAgent: navigator.userAgent,
+              });
+              const outcome = await copyText(shareEnvironment(), text);
+              if (outcome === 'copied') notify('Diagnostics copied.');
+              return { outcome, text };
+            }}
+          />
+        }
+        shortcuts={`1–${SHADER_MANIFESTS.length} scenes · P pause · H panel${fullscreen.supported ? ' · F fullscreen' : ''} · Space pulse`}
+      />
+      {!capture && <NoticeRegion notice={notice} onDismiss={dismiss} />}
       {error && (
         <div className="error" role="alert">
           {error}
@@ -392,31 +504,5 @@ export function App() {
         </div>
       )}
     </main>
-  );
-}
-function Slider({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="slider">
-      <span>
-        {label}
-        <output>{Math.round(value * 100)}%</output>
-      </span>
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-    </label>
   );
 }

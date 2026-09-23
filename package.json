@@ -22,7 +22,8 @@
     "dev:web": "pnpm --filter @ambient/web dev",
     "clean": "pnpm -r run clean",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
-    "test:visual": "node scripts/visual-check.mjs"
+    "test:visual": "node scripts/visual-check.mjs",
+    "test:app": "node scripts/app-check.mjs"
   },
   "devDependencies": {
     "@ambient/sdk": "workspace:*",

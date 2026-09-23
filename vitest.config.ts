@@ -9,14 +9,20 @@ export default defineConfig({
     alias: [
       { find: '@ambient/sdk/testing', replacement: sdk('testing/index.ts') },
       { find: '@ambient/sdk', replacement: sdk('index.ts') },
+      // App state tests validate scene ids against the real manifest registry.
+      {
+        find: '@ambient/shaders',
+        replacement: fileURLToPath(new URL('./packages/shaders/src/index.ts', import.meta.url)),
+      },
     ],
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts'],
+    // App tests cover pure state modules only; DOM behavior is checked in a real browser.
+    include: ['packages/*/test/**/*.test.ts', 'apps/web/test/**/*.test.ts'],
     environment: 'node',
     coverage: {
       provider: 'v8',
-      include: ['packages/*/src/**'],
+      include: ['packages/*/src/**', 'apps/web/src/state/**'],
     },
   },
 });

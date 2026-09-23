@@ -22,5 +22,5 @@
       "@ambient/sources": ["../../packages/sources/src/index.ts"]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "test", "vite.config.ts"]
 }
