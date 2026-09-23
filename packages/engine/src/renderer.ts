@@ -1,4 +1,5 @@
 import { type ShaderManifest, STANDARD_UNIFORMS } from '@ambient/sdk';
+import { GestureMemory } from './gesture-memory.js';
 import { type ColorFormat, pickColorFormat, RenderTarget } from './gl/targets.js';
 import type { UniformState } from './mapper.js';
 import { type PassId, planPasses, planTargets } from './post/plan.js';
@@ -78,6 +79,9 @@ interface Pass {
   readonly loc: Locations;
 }
 
+// Renderer-local art state; the public signal protocol remains unchanged.
+const SCENE_UNIFORMS = [...STANDARD_UNIFORMS, 'u_gesture'] as const;
+
 const POST_UNIFORMS = [
   'u_scene',
   'u_bloom',
@@ -125,6 +129,7 @@ export class CanvasRenderer {
   #lost = false;
   #geometry: Pass | undefined;
   #form = 0.45;
+  #gesture = new GestureMemory();
   #pointer: readonly [number, number, number] = [0.5, 0.5, 0];
   #display: RenderTarget | undefined;
   #outgoing: RenderTarget | undefined;
@@ -203,7 +208,7 @@ export class CanvasRenderer {
           `#version 300 es\n#define AAP_QUALITY ${this.#shaderQuality}`,
         );
         const gp = this.#link(src, assembleFragment(manifest.geometry.fragment, this.#defines()));
-        geometry = { program: gp, loc: this.#locations(gp, STANDARD_UNIFORMS) };
+        geometry = { program: gp, loc: this.#locations(gp, SCENE_UNIFORMS) };
       }
     } catch (error) {
       gl.deleteProgram(program);
@@ -219,8 +224,9 @@ export class CanvasRenderer {
     this.#geometry = geometry;
     this.#program = program;
     this.#manifest = manifest;
+    if (!preserveHistory) this.#gesture.reset();
     gl.useProgram(program);
-    this.#loc = this.#locations(program, STANDARD_UNIFORMS);
+    this.#loc = this.#locations(program, SCENE_UNIFORMS);
     const prev = this.#loc.u_prevFrame;
     if (prev) gl.uniform1i(prev, 0);
     // A new theme must not inherit the old one's last frame as a bright flash.
@@ -295,6 +301,7 @@ export class CanvasRenderer {
     const scene = this.#scene;
     const bloom = this.#bloom;
     if (!scene || !bloom) return;
+    this.#gesture.advance(this.#pointer, state.u_dt);
     const passes = planPasses(this.#settings);
     gl.bindVertexArray(this.#vao);
     for (const pass of passes) this.#draw(pass, state, scene, bloom);
@@ -609,6 +616,7 @@ export class CanvasRenderer {
     const gl = this.gl;
     if (loc.u_form) gl.uniform1f(loc.u_form, this.#form);
     if (loc.u_pointer) gl.uniform3f(loc.u_pointer, ...this.#pointer);
+    if (loc.u_gesture) gl.uniform4fv(loc.u_gesture, this.#gesture.uniform);
     if (loc.u_time) gl.uniform1f(loc.u_time, state.u_time);
     if (loc.u_resolution) gl.uniform2f(loc.u_resolution, width, height);
     if (loc.u_pulse) gl.uniform1f(loc.u_pulse, state.u_pulse);
