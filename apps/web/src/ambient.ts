@@ -12,6 +12,7 @@ import { DataSignalBus, type Source, SourceRegistry, type SourceStatus } from '@
 import { createMockSource } from '@ambient/sdk/testing';
 import { findShader, livingFilaments, SHADER_MANIFESTS } from '@ambient/shaders';
 import { binanceTrades, wikipediaEdits } from '@ambient/sources';
+import type { Subscription } from 'rxjs';
 
 export const OVERLAY_SOURCE = 'overlay';
 
@@ -91,6 +92,8 @@ export class AmbientStage {
   };
 
   readonly #sources = new Map<string, Source>();
+  readonly #statusSubscriptions: Subscription[] = [];
+  #disposed = false;
   #qualityMode: QualityMode = 'auto';
   #frames = 0;
   #fpsWindowStart = 0;
@@ -236,13 +239,16 @@ export class AmbientStage {
   async setSource(id: string, on: boolean): Promise<void> {
     let source = this.#sources.get(id);
     if (on) {
+      if (this.#disposed) return;
       if (!source) {
         const opt = SOURCE_OPTIONS.find((o) => o.id === id);
         if (!opt) return;
         source = opt.create();
         this.#sources.set(id, source);
         this.registry.add(source);
-        source.status$.subscribe((status) => this.#onSourceStatus?.(id, status));
+        this.#statusSubscriptions.push(
+          source.status$.subscribe((status) => this.#onSourceStatus?.(id, status)),
+        );
       }
       try {
         await source.start(this.bus);
@@ -255,6 +261,9 @@ export class AmbientStage {
   }
 
   dispose(): void {
+    this.#disposed = true;
+    // Late status transitions from the async registry shutdown must not reach an unmounted UI.
+    for (const sub of this.#statusSubscriptions.splice(0)) sub.unsubscribe();
     this.loop.stop();
     this.#resizeObserver?.disconnect();
     document.removeEventListener('visibilitychange', this.#onVisibility);

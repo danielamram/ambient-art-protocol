@@ -1,8 +1,11 @@
+import type { SourceStatus } from '@ambient/sdk';
 import { SHADER_MANIFESTS } from '@ambient/shaders';
 import { useEffect, useRef, useState } from 'react';
 import { type Readout, SOURCE_OPTIONS } from './ambient.js';
+import { PHASE_LABEL, SourcePicker } from './components/SourcePicker.js';
 import { TuningPanel } from './components/TuningPanel.js';
 import { useAmbientStage } from './hooks/use-ambient-stage.js';
+import { useSourceSelection } from './hooks/use-source-selection.js';
 import { applySettings } from './state/apply-settings.js';
 import {
   type ArtworkSettingsV1,
@@ -31,7 +34,6 @@ export function App() {
   const heading = useRef<HTMLHeadingElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const pointer = useRef<number | null>(null);
-  const sourceChange = useRef(Promise.resolve());
   const [initial] = useState(() => ({ settings: initialSettings(), quality: 'auto' as const }));
   const [settings, setSettings] = useState<ArtworkSettingsV1>(initial.settings);
   const settingsRef = useRef(settings);
@@ -41,27 +43,24 @@ export function App() {
   const [open, setOpen] = useState(false);
   const [idle, setIdle] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [source, setSource] = useState('');
-  const [status, setStatus] = useState('Autonomous');
   const [readout, setReadout] = useState<Readout | null>(null);
   const [error, setError] = useState<string | null>(null);
   const capture = new URLSearchParams(location.search).has('capture');
   const active = SHADER_MANIFESTS.find((m) => m.id === settings.scene) ?? SHADER_MANIFESTS[0];
 
+  const sourceStatus = useRef<(id: string, s: SourceStatus) => void>(() => undefined);
   const { handle, mounted } = useAmbientStage(canvas, initial, {
     onReadout: setReadout,
     onError: setError,
-    onSourceStatus: (_id, s) =>
-      setStatus(
-        s === 'running'
-          ? 'Live signal'
-          : s === 'error'
-            ? 'Source unavailable'
-            : s === 'starting'
-              ? 'Connecting'
-              : 'Autonomous',
-      ),
+    onSourceStatus: (id, s) => sourceStatus.current(id, s),
   });
+  const sources = useSourceSelection(handle, mounted, () => {
+    // Autonomous: the overlay's own signals again, from the settings selected *now*.
+    const h = handle.current;
+    h?.art.setPalette(paletteOf(settingsRef.current.palette).mood);
+    h?.stage.setCurrent(0.5, 0.5, 0);
+  });
+  sourceStatus.current = sources.onStatus;
   useEffect(() => {
     if (!mounted) return;
     setSettings(mounted.settings);
@@ -175,23 +174,6 @@ export function App() {
     if (e.currentTarget.hasPointerCapture(e.pointerId))
       e.currentTarget.releasePointerCapture(e.pointerId);
   };
-  const changeSource = (id: string) => {
-    setSource(id);
-    // Serialize changes: two feeds never compete for the palette/current accidentally.
-    sourceChange.current = sourceChange.current
-      .then(async () => {
-        const s = handle.current;
-        if (!s) return;
-        for (const opt of SOURCE_OPTIONS) await s.stage.setSource(opt.id, false);
-        if (id) await s.stage.setSource(id, true);
-        else {
-          s.art.setPalette(paletteOf(settingsRef.current.palette).mood);
-          s.stage.setCurrent(0.5, 0.5, 0);
-          setStatus('Autonomous');
-        }
-      })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-  };
   const closePanel = () => {
     setOpen(false);
     toggle.current?.focus();
@@ -230,9 +212,9 @@ export function App() {
           </span>
         </a>
         <div className="header-right">
-          <span className={`live-label ${source ? 'connected' : ''}`}>
+          <span className={`live-label ${sources.view.phase === 'live' ? 'connected' : ''}`}>
             <i />
-            {status}
+            {PHASE_LABEL[sources.view.phase]}
           </span>
           <button
             type="button"
@@ -312,21 +294,13 @@ export function App() {
           handle.current?.stage.setQualityMode(q);
         }}
         source={
-          <label className="select-label">
-            Driven by
-            <select
-              value={source}
-              disabled={capture}
-              onChange={(e) => changeSource(e.target.value)}
-            >
-              <option value="">Autonomous motion</option>
-              {SOURCE_OPTIONS.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.id === 'mock' ? 'Demo signals (simulated)' : s.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SourcePicker
+            options={SOURCE_OPTIONS}
+            view={sources.view}
+            disabled={capture}
+            onSelect={(id) => void sources.select(id)}
+            onRetry={() => void sources.retry()}
+          />
         }
         diagnostics={
           readout && (
