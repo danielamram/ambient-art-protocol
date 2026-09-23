@@ -63,6 +63,8 @@ export function useAmbientStage(
       stage.setQualityMode(init.current.quality);
     }
     handle.current = { stage, art };
+    // Dev-only seam for scripts/app-check.mjs; stripped from production builds.
+    if (import.meta.env.DEV) (window as { __aapStage?: AmbientStage }).__aapStage = stage;
     setMounted({ settings, glow: result.ok ? result.glow : art.glow });
     stage.start();
     return () => {

@@ -1,32 +1,71 @@
 import type { SourceStatus } from '@ambient/sdk';
 import { SHADER_MANIFESTS } from '@ambient/shaders';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { type Readout, SOURCE_OPTIONS } from './ambient.js';
+import { NoticeRegion } from './components/NoticeRegion.js';
+import { SavedLooks } from './components/SavedLooks.js';
 import { PHASE_LABEL, SourcePicker } from './components/SourcePicker.js';
 import { TuningPanel } from './components/TuningPanel.js';
 import { useAmbientStage } from './hooks/use-ambient-stage.js';
+import { useNotices } from './hooks/use-notices.js';
+import { useSavedLooks } from './hooks/use-saved-looks.js';
 import { useSourceSelection } from './hooks/use-source-selection.js';
 import { applySettings } from './state/apply-settings.js';
 import {
   type ArtworkSettingsV1,
-  DEFAULT_SCENE,
-  defaultSettings,
-  hasScene,
+  DEFAULT_DEVICE,
   type PaletteId,
   paletteOf,
   type QualityMode,
   resetArtwork,
+  settingsEqual,
   withScene,
 } from './state/artwork-settings.js';
+import {
+  ADJUSTED_NOTICE,
+  decodeLookFragment,
+  resolveStartup,
+  shareUrl,
+} from './state/look-codec.js';
+import {
+  browserStore,
+  newLookId,
+  normalizeName,
+  readDevicePreferences,
+  readLastLook,
+  type SavedLookV1,
+  STORAGE_KEYS,
+  writeJson,
+} from './state/look-storage.js';
+import { type ShareEnvironment, shareLink } from './state/share.js';
 
 const COLLECTION = SHADER_MANIFESTS.slice(0, 3);
-const initialSettings = (): ArtworkSettingsV1 => {
-  const id = new URLSearchParams(location.search).get('scene');
-  return defaultSettings(hasScene(SHADER_MANIFESTS, id) ? id : DEFAULT_SCENE);
-};
+const LAST_LOOK_DEBOUNCE_MS = 400;
+const NOT_SAVED =
+  'Changes could not be saved on this device. They will last until this tab closes.';
+/** Bound navigator methods: calling an unbound `navigator.share` throws. */
+const shareEnvironment = (): ShareEnvironment => ({
+  ...(typeof navigator.share === 'function' ? { share: (d) => navigator.share(d) } : {}),
+  ...(navigator.clipboard ? { clipboard: navigator.clipboard } : {}),
+});
 const editable = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   (target.isContentEditable || /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(target.tagName));
+
+/** Everything decided once, before the stage exists. */
+function boot() {
+  const capture = new URLSearchParams(location.search).has('capture');
+  const store = browserStore(() => window.localStorage);
+  const startup = resolveStartup({
+    search: location.search,
+    hash: location.hash,
+    // Capture mode bypasses anything saved on this device.
+    stored: capture ? null : readLastLook(store, SHADER_MANIFESTS),
+    scenes: SHADER_MANIFESTS,
+  });
+  const device = capture ? DEFAULT_DEVICE : (readDevicePreferences(store) ?? DEFAULT_DEVICE);
+  return { capture, store, startup, device };
+}
 
 export function App() {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -34,18 +73,23 @@ export function App() {
   const heading = useRef<HTMLHeadingElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const pointer = useRef<number | null>(null);
-  const [initial] = useState(() => ({ settings: initialSettings(), quality: 'auto' as const }));
+  const [{ capture, store, startup, device }] = useState(boot);
+  const [initial] = useState(() => ({ settings: startup.settings, quality: device.quality }));
   const [settings, setSettings] = useState<ArtworkSettingsV1>(initial.settings);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  /** Only user-initiated changes are remembered as the last look, never startup fallbacks. */
+  const userChanged = useRef(false);
   const [glow, setGlow] = useState(0.28);
   const [quality, setQuality] = useState<QualityMode>(initial.quality);
+  const [loadedId, setLoadedId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [idle, setIdle] = useState(false);
   const [paused, setPaused] = useState(false);
   const [readout, setReadout] = useState<Readout | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const capture = new URLSearchParams(location.search).has('capture');
+  const { notice, notify, dismiss } = useNotices(!capture);
+  const saved = useSavedLooks(store, SHADER_MANIFESTS, notify);
   const active = SHADER_MANIFESTS.find((m) => m.id === settings.scene) ?? SHADER_MANIFESTS[0];
 
   const sourceStatus = useRef<(id: string, s: SourceStatus) => void>(() => undefined);
@@ -66,6 +110,26 @@ export function App() {
     setSettings(mounted.settings);
     setGlow(mounted.glow);
   }, [mounted]);
+  useEffect(() => {
+    if (startup.notice) notify(startup.notice);
+  }, [startup, notify]);
+
+  // Remember the last look, debounced, and flush when the page is hidden.
+  useEffect(() => {
+    if (capture || !userChanged.current) return;
+    let written = false;
+    const write = () => {
+      if (written) return;
+      written = true;
+      if (!writeJson(store, STORAGE_KEYS.lastLook, settingsRef.current) && store) notify(NOT_SAVED);
+    };
+    const timer = window.setTimeout(write, LAST_LOOK_DEBOUNCE_MS);
+    window.addEventListener('pagehide', write);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('pagehide', write);
+    };
+  }, [settings, capture, store, notify]);
 
   useEffect(() => {
     let timer = 0;
@@ -92,12 +156,32 @@ export function App() {
     if (!h) return false;
     const result = applySettings(h.art, next, settingsRef.current);
     if (!result.ok) {
-      if (result.reason === 'apply') setError('That look could not be applied.');
+      notify(
+        result.reason === 'scene'
+          ? 'That scene could not be shown, so the current look was kept.'
+          : 'That look could not be applied, so the current look was kept.',
+      );
       return false;
     }
+    // Updated now, not on the next render: a settling source coordinator reads it.
+    settingsRef.current = next;
+    userChanged.current = true;
     setSettings(next);
     setGlow(result.glow);
-    setError(null);
+    return true;
+  };
+  /**
+   * Load a saved or shared look. A live source is returned to Autonomous first: selecting
+   * Autonomous aborts the source synchronously, so no late event can override the look.
+   */
+  const loadLook = (next: ArtworkSettingsV1, id: string | null, message?: string) => {
+    const hadSource = sources.view.selected !== '';
+    if (hadSource) void sources.select('');
+    if (!applyLook(next)) return false;
+    setLoadedId(id);
+    const parts = [message, hadSource ? 'Live source stopped; back to Autonomous.' : undefined];
+    const text = parts.filter(Boolean).join(' ');
+    if (text) notify(text);
     return true;
   };
   const selectScene = (id: string) => {
@@ -105,7 +189,10 @@ export function App() {
   };
   const update = (patch: Partial<ArtworkSettingsV1>, write: () => void) => {
     write();
-    setSettings((s) => ({ ...s, ...patch }));
+    userChanged.current = true;
+    const next = { ...settingsRef.current, ...patch };
+    settingsRef.current = next;
+    setSettings(next);
   };
   const setPalette = (palette: PaletteId) =>
     update({ palette }, () => handle.current?.art.setPalette(paletteOf(palette).mood));
@@ -121,8 +208,87 @@ export function App() {
     const g = handle.current?.art.clearLighting();
     if (g === undefined) return;
     setGlow(g);
-    setSettings((s) => ({ ...s, glow: null }));
+    update({ glow: null }, () => undefined);
   };
+  const changeQuality = (q: QualityMode) => {
+    setQuality(q);
+    handle.current?.stage.setQualityMode(q);
+    if (!writeJson(store, STORAGE_KEYS.device, { version: 1, quality: q }) && store) {
+      notify(NOT_SAVED);
+    }
+  };
+
+  // Shared links opened while the app is running (paste, back/forward). Nothing here writes the
+  // hash, so applying a link can never trigger another hashchange.
+  const onHash = useRef<() => void>(() => undefined);
+  onHash.current = () => {
+    const decoded = decodeLookFragment(location.hash, SHADER_MANIFESTS);
+    if (decoded.kind === 'invalid') {
+      notify('That link’s look could not be read, so nothing was changed.');
+    } else if (decoded.kind === 'ok' && !settingsEqual(decoded.settings, settingsRef.current)) {
+      loadLook(
+        decoded.settings,
+        null,
+        decoded.adjusted ? `Opened a shared look. ${ADJUSTED_NOTICE}` : 'Opened a shared look.',
+      );
+    }
+  };
+  useEffect(() => {
+    if (capture) return;
+    const listener = () => onHash.current();
+    window.addEventListener('hashchange', listener);
+    return () => window.removeEventListener('hashchange', listener);
+  }, [capture]);
+
+  // Saved looks.
+  const now = () => new Date().toISOString();
+  const persisted = (result: ReturnType<typeof saved.mutate>, done: string): boolean => {
+    if (!result.ok) {
+      notify(
+        result.reason === 'limit'
+          ? 'You already have 30 saved looks. Delete one or update an existing look.'
+          : result.reason === 'name'
+            ? 'Give the look a name first.'
+            : 'That look is no longer saved here; the list has been refreshed.',
+      );
+      return false;
+    }
+    notify(result.durable ? done : `${done} ${NOT_SAVED}`);
+    return true;
+  };
+  const saveLook = (rawName: string): boolean => {
+    const name = normalizeName(rawName);
+    if (name === null) {
+      notify('Give the look a name first.');
+      return false;
+    }
+    const at = now();
+    const look: SavedLookV1 = {
+      id: newLookId(),
+      name,
+      createdAt: at,
+      updatedAt: at,
+      settings: settingsRef.current,
+    };
+    const ok = persisted(saved.mutate({ type: 'create', look }), 'Look saved.');
+    if (ok) setLoadedId(look.id);
+    return ok;
+  };
+  const deleteLook = (id: string) => {
+    const index = saved.looks.findIndex((l) => l.id === id);
+    const look = saved.looks[index];
+    const result = saved.mutate({ type: 'delete', id });
+    if (!result.ok || !look) return void persisted(result, '');
+    if (loadedId === id) setLoadedId(null);
+    notify(`Deleted “${look.name}”.`, {
+      label: 'Undo',
+      run: () => {
+        persisted(saved.mutate({ type: 'restore', look, index }), 'Look restored.');
+        dismiss();
+      },
+    });
+  };
+
   const pause = () => {
     const s = handle.current?.stage;
     if (!s) return;
@@ -174,10 +340,10 @@ export function App() {
     if (e.currentTarget.hasPointerCapture(e.pointerId))
       e.currentTarget.releasePointerCapture(e.pointerId);
   };
-  const closePanel = () => {
+  const closePanel = useCallback(() => {
     setOpen(false);
     toggle.current?.focus();
-  };
+  }, []);
 
   return (
     <main className={`experience ${idle && !open ? 'is-idle' : ''} ${capture ? 'is-capture' : ''}`}>
@@ -289,10 +455,41 @@ export function App() {
         onGlow={setGlowOverride}
         onResetLighting={resetLighting}
         onResetArtwork={() => applyLook(resetArtwork(settingsRef.current))}
-        onQuality={(q) => {
-          setQuality(q);
-          handle.current?.stage.setQualityMode(q);
-        }}
+        onQuality={changeQuality}
+        looks={
+          <SavedLooks
+            looks={saved.looks}
+            scenes={SHADER_MANIFESTS}
+            current={settings}
+            loadedId={loadedId}
+            persistence={saved.persistence}
+            onSave={saveLook}
+            onLoad={(look) => loadLook(look.settings, look.id, `Loaded “${look.name}”.`)}
+            onRename={(id, name) =>
+              persisted(saved.mutate({ type: 'rename', id, name, at: now() }), 'Look renamed.')
+            }
+            onUpdate={(id) => {
+              if (
+                persisted(
+                  saved.mutate({ type: 'update', id, settings: settingsRef.current, at: now() }),
+                  'Look updated.',
+                )
+              )
+                setLoadedId(id);
+            }}
+            onDelete={deleteLook}
+            onShare={async () => {
+              const url = shareUrl(location, settingsRef.current);
+              const outcome = await shareLink(
+                shareEnvironment(),
+                url,
+                `${active?.name ?? 'Ambient'} look`,
+              );
+              if (outcome === 'copied') notify('Link copied.');
+              return { outcome, url };
+            }}
+          />
+        }
         source={
           <SourcePicker
             options={SOURCE_OPTIONS}
@@ -311,6 +508,7 @@ export function App() {
         }
         shortcuts="1–6 scenes · P pause · F fullscreen · Space pulse"
       />
+      {!capture && <NoticeRegion notice={notice} onDismiss={dismiss} />}
       {error && (
         <div className="error" role="alert">
           {error}

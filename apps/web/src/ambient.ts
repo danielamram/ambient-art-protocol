@@ -148,6 +148,11 @@ export class AmbientStage {
     this.#dirty = true;
   }
 
+  /** Whether a held pointer is currently gathering light. */
+  get pointerActive(): boolean {
+    return this.#pointerTarget[2] === 1;
+  }
+
   setPointer(x: number, y: number, down: boolean): void {
     this.#pointerTarget = [x, y, down ? 1 : 0];
     this.#dirty = true;
