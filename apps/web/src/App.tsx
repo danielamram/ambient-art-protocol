@@ -2,6 +2,7 @@ import type { SourceStatus } from '@ambient/sdk';
 import { SHADER_MANIFESTS } from '@ambient/shaders';
 import { useEffect, useRef, useState } from 'react';
 import { type Readout, SOURCE_OPTIONS } from './ambient.js';
+import { Diagnostics } from './components/Diagnostics.js';
 import { NoticeRegion } from './components/NoticeRegion.js';
 import { SavedLooks } from './components/SavedLooks.js';
 import { PHASE_LABEL, SourcePicker } from './components/SourcePicker.js';
@@ -24,6 +25,7 @@ import {
   settingsEqual,
   withScene,
 } from './state/artwork-settings.js';
+import { diagnosticsReport } from './state/diagnostics.js';
 import {
   ADJUSTED_NOTICE,
   decodeLookFragment,
@@ -40,7 +42,7 @@ import {
   STORAGE_KEYS,
   writeJson,
 } from './state/look-storage.js';
-import { type ShareEnvironment, shareLink } from './state/share.js';
+import { copyText, type ShareEnvironment, shareLink } from './state/share.js';
 
 const COLLECTION = SHADER_MANIFESTS.slice(0, 3);
 const LAST_LOOK_DEBOUNCE_MS = 400;
@@ -466,11 +468,29 @@ export function App() {
           />
         }
         diagnostics={
-          readout && (
-            <p className="readout">
-              {readout.fps.toFixed(0)} fps · {readout.quality} · {readout.hdr ? 'HDR' : 'standard'}
-            </p>
-          )
+          <Diagnostics
+            readout={readout}
+            onCopy={async () => {
+              const text = diagnosticsReport({
+                timestamp: new Date().toISOString(),
+                appVersion: __AAP_VERSION__,
+                commit: __AAP_COMMIT__,
+                scene: settingsRef.current.scene,
+                qualityPreference: quality,
+                readout,
+                paused,
+                source: sources.view.selected,
+                viewport: { width: window.innerWidth, height: window.innerHeight },
+                devicePixelRatio: window.devicePixelRatio,
+                reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+                visibility: document.visibilityState,
+                userAgent: navigator.userAgent,
+              });
+              const outcome = await copyText(shareEnvironment(), text);
+              if (outcome === 'copied') notify('Diagnostics copied.');
+              return { outcome, text };
+            }}
+          />
         }
         shortcuts={`1–${SHADER_MANIFESTS.length} scenes · P pause · H panel${fullscreen.supported ? ' · F fullscreen' : ''} · Space pulse`}
       />

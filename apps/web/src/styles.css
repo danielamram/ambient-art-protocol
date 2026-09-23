@@ -694,3 +694,32 @@ summary {
   font-size: 10px;
   color: #bfd9cc;
 }
+.diagnostics {
+  display: grid;
+  gap: 8px;
+}
+.diagnostics dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+.diagnostics dt {
+  color: #5f7a6d;
+}
+.diagnostics dd {
+  margin: 0;
+  color: #a9c2b6;
+}
+.diagnostics textarea {
+  width: 100%;
+  background: #ffffff06;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: #d3e5dc;
+  font:
+    10px / 1.4 ui-monospace,
+    monospace;
+  padding: 8px;
+  resize: vertical;
+}

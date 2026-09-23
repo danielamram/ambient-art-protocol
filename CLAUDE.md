@@ -39,11 +39,13 @@ Read `docs/brainstorm.md` for the design critique and the reasoning behind the d
   Shipped: `aurora-drift` (warped light curtains), `fluid-field` (feedback-advected ink), and
   `cybernetic-mesh` (raymarched wire sphere over a floor grid). Shared chunks live in
   `src/lib/glsl.ts` (noise, palette, pulse helpers, standard uniform block).
-- `apps/web`: Vite + React full-screen canvas with a floating overlay (theme picker, sliders that
-  emit onto the bus, tap-to-pulse, drag-to-steer, post FX and quality controls, mock source
-  toggle, live readout). The overlay and cursor hide after a few idle seconds; `space` pulses,
-  `1..n` pick a theme, `h` hides the panel, `f` goes fullscreen. Deployed to Vercel from
-  `vercel.json` at the root.
+- `apps/web`: Vite + React full-screen canvas with a non-modal tuning panel (scene, palette,
+  form/motion/glow, saved looks, share links, source picker, Studio settings with quality and
+  diagnostics). Pure state lives in `src/state` (settings, URL codec, storage, source
+  coordinator), tested from `apps/web/test`; `src/stage-adapter.ts` is the only bridge to
+  `AmbientStage`. Chrome hides after idle seconds; `space` pulses, `1..n` pick a scene, `p`
+  pauses, `h` toggles the panel, `f` goes fullscreen. See `docs/app-experience.md`. Deployed to
+  Vercel from `vercel.json` at the root.
 
 ## Code Conventions
 - Strict TypeScript, ESM only, `module: NodeNext`. Relative imports use the `.js` extension.
@@ -54,7 +56,8 @@ Read `docs/brainstorm.md` for the design critique and the reasoning behind the d
   throws `SignalValidationError` so plugin bugs surface immediately. In prod it clamps to 0.
 - Signals are plain JSON: no `Date`, no class instances, no `Infinity`.
 - Biome for lint and format (`pnpm lint`, `pnpm lint:fix`). No ESLint or Prettier.
-- Tests live in `packages/*/test/*.test.ts` and run with vitest from the root. Use
+- Tests live in `packages/*/test/*.test.ts` and `apps/web/test/*.test.ts` (pure app state only,
+  Node environment) and run with vitest from the root. Use
   `vi.useFakeTimers()` *before* subscribing when testing time-based operators.
 - Renderer is raw WebGL2: fullscreen fragment scenes plus optional six-vertex instanced ribbon passes. No Three.js.
 - **Theme authoring.** Themes output linear, HDR-ish colour and never tonemap, gamma-correct or
@@ -77,6 +80,8 @@ pnpm dev:engine   # tsx demo: mock source -> bus -> mapper -> uniform snapshots,
 pnpm dev:web      # vite dev server for apps/web
 pnpm build:web    # production bundle to apps/web/dist (what Vercel runs)
 pnpm check        # typecheck + lint + test
+pnpm test:visual  # Chromium shader/GPU gate (24 combinations)
+pnpm test:app     # Chromium app flows: looks, links, keyboard, sources, mobile
 ```
 
 ## Roadmap
@@ -89,9 +94,10 @@ pnpm check        # typecheck + lint + test
 - Phase 4 (partial): `wikipedia-edits` and `binance-trades` are done and toggleable in the web app.
   Still to do: `webhook-pulse` (Node HTTP endpoint) plus the WebSocket relay transport so Node-side
   sources can feed a browser renderer. Plugins that die after starting call `ctx.fail(err)`.
-- Phase 5 (partial): `apps/web` has the overlay, cinema mode (idle auto-hide), keyboard
-  shortcuts, drag-to-steer, post FX and quality controls. Still to do: signal scope sparklines,
-  source presets, recorder/replayer.
+- Phase 5 (partial): `apps/web` has the panel, cinema mode, keyboard shortcuts, drag-to-steer,
+  typed settings with one ordered apply path, share links (`#look=1&…`), local saved looks,
+  latest-request-wins source selection, and diagnostics. Still to do: signal scope sparklines,
+  source presets, recorder/replayer. Exact replay, seeds and export need renderer contracts.
 
 ## Visual collection update
 - Read `docs/visual-refinement.md` for the new scene contract and verification commands.
@@ -102,3 +108,4 @@ pnpm check        # typecheck + lint + test
 - `ArtClock` owns playback speed and reduced motion independently of source timestamps.
 - `pnpm test:visual` starts Vite and runs real Chromium shader/interaction checks; install the
   browser with `pnpm exec playwright install chromium` first. `CHROMIUM_PATH` overrides the binary.
+  `pnpm test:app` does the same for app flows and never touches third-party networks.

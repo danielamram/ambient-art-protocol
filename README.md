@@ -88,6 +88,10 @@ Events) or **BTC/USDT trades** (Binance public WebSocket). Both are free, need n
 the browser. Hold and release the canvas to send a pulse by hand. Sources still emit normalized signals on
 the same bus; local form, pointer, and playback controls belong to the renderer.
 
+Tune the look from the panel, save it on this device, or share it as a link
+(`#look=1&scene=…`). A link reopens the settings, not an exact moment: animation and live
+signals may differ, and a link never starts a live feed. Details in `docs/app-experience.md`.
+
 ## Deploy
 
 The repo is Vercel-ready. Import the repository in the Vercel dashboard and set **Root Directory**
@@ -104,6 +108,8 @@ Requires Node 20+ and pnpm 10.
 pnpm install
 pnpm build       # build workspace declarations first
 pnpm check       # typecheck + lint + test
+pnpm test:visual # Chromium shader/GPU checks
+pnpm test:app    # Chromium app-flow checks (no third-party network)
 pnpm dev         # watch a mock source stream signals through the bus
 pnpm dev:engine  # same, through the mapper: targets vs damped values
 ```
