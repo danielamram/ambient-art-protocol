@@ -9,6 +9,8 @@ export interface StageCallbacks {
   onReadout(r: Readout): void;
   onError(message: string): void;
   onSourceStatus(id: string, status: SourceStatus): void;
+  /** Runs right after construction, before the initial look is applied. Returns a cleanup. */
+  onCreated?(stage: AmbientStage): () => void;
 }
 
 export interface StageHandle {
@@ -47,6 +49,7 @@ export function useAmbientStage(
       latest.current.onError(e instanceof Error ? e.message : String(e));
       return;
     }
+    const detach = latest.current.onCreated?.(stage);
     const art = artworkStage(stage);
     stage.onReadout((r) => latest.current.onReadout(r));
     stage.onError((m) => latest.current.onError(m));
@@ -69,6 +72,7 @@ export function useAmbientStage(
     stage.start();
     return () => {
       handle.current = null;
+      detach?.();
       stage.dispose();
     };
   }, [canvas]);

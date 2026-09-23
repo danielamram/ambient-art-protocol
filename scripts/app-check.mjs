@@ -485,6 +485,32 @@ try {
     },
   );
 
+  await step('signal scope: samples the bus only while expanded, and graphs signals', async () => {
+    const { context, page } = await open('/');
+    await openPanel(page);
+    const scope = page.locator('details.scope');
+    assert.equal(await scope.locator('.scope-row').count(), 0);
+    await scope.locator('summary').click();
+    const value = (name) => scope.locator('.scope-row', { hasText: name }).locator('.scope-value');
+    // The palette emitted at startup is already known: Glacier is mood 0.
+    await page.waitForTimeout(400);
+    assert.equal(await value('Mood').textContent(), '0%');
+    await page.getByRole('button', { name: 'Iris', exact: true }).click();
+    await page.locator('canvas').click({ position: { x: 200, y: 200 } });
+    await page.waitForTimeout(600);
+    assert.equal(await value('Mood').textContent(), '100%');
+    assert.ok(
+      (await scope.locator('.scope-pulse path').getAttribute('d'))?.includes('L'),
+      'pulse sparkline has a line',
+    );
+    assert.equal(await scope.locator('svg[aria-hidden="true"]').count(), 4);
+    await scope.screenshot({ path: resolve(output, 'signal-scope.png') });
+    // Collapsed: the rows unmount and sampling stops.
+    await scope.locator('summary').click();
+    await scope.locator('.scope-row').first().waitFor({ state: 'detached' });
+    await context.close();
+  });
+
   for (const width of [390, 320]) {
     await step(
       `mobile ${width}px: no horizontal overflow, panel scrolls, gestures stay out of the canvas`,

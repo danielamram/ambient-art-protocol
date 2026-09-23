@@ -723,3 +723,50 @@ summary {
   padding: 8px;
   resize: vertical;
 }
+.scope {
+  border-top: 0;
+  padding-top: 0;
+}
+.scope summary {
+  margin-bottom: 8px;
+}
+.scope-rows {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.scope-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+  font-size: 9px;
+  color: #7f978b;
+}
+.scope-row svg {
+  width: 100%;
+  height: 22px;
+  overflow: visible;
+}
+.scope-row path {
+  fill: none;
+  stroke: #9fcfbb;
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+.scope-row .scope-base {
+  stroke: #ffffff14;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.scope-pulse path {
+  stroke: #e3c29b;
+}
+.scope-value {
+  text-align: right;
+  color: #a9c2b6;
+  font-variant-numeric: tabular-nums;
+}

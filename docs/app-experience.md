@@ -18,7 +18,7 @@ See `visual-refinement.md` for those.
 - `src/stage-adapter.ts`: maps `ArtworkStage` and `SourceDriver` onto `AmbientStage`.
 - `src/hooks/*`: stage lifecycle, source selection, saved looks, notices, shortcuts, cinema
   mode, the canvas pointer and fullscreen.
-- `src/components/*`: `TuningPanel`, `SavedLooks`, `SourcePicker`, `Diagnostics`,
+- `src/components/*`: `TuningPanel`, `SavedLooks`, `SourcePicker`, `SignalScope`, `Diagnostics`,
   `NoticeRegion`, `Slider`.
 
 ## Settings
@@ -126,6 +126,22 @@ waiting for the 15 s connect timeout. Third-party plugins that ignore `ctx.signa
 their own `stop()` until their `start()` settles; the coordinator's abort still prevents them
 from emitting.
 
+## Signal scope
+
+"Signal scope" under the source picker shows sparklines of what reaches the bus. It shows the
+input to the artwork, not the rendered result.
+
+- **Channels:** Pulses (the strongest in each bucket), Mood, Turbulence and Current
+  velocity. Values are already normalized to [0, 1] on the wire.
+- **Sources:** everything on the bus is included: live feeds, your taps and the palette.
+- **Recording:** `state/signal-scope.ts` records each signal in O(1) from the moment the
+  stage is created, so the current mood is known as soon as the scope opens.
+- **Sampling:** only while the scope is expanded inside an open panel. It samples every
+  250 ms (15 s of history), or every 1 s with reduced motion (60 s). It pauses in hidden
+  tabs and never runs per frame. Collapsing the scope stops React updates.
+- **Accessibility:** graphs are `aria-hidden` SVG, and each row shows its latest value as
+  text. Nothing is announced as values change.
+
 ## Input and accessibility
 
 - The panel is a non-modal `aside` labelled by its heading:
@@ -196,7 +212,7 @@ handle; production builds strip it. It covers:
 - Source failure, retry, pending start versus a loaded look, and rapid switching, using a
   routed fake Wikimedia stream.
 - 390 px and 320 px layouts; reduced motion; unsupported fullscreen.
-- Diagnostics; capture and legacy URLs.
+- The signal scope; diagnostics; capture and legacy URLs.
 
 Screenshots go to `artifacts/app-check/`.
 
