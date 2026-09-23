@@ -158,6 +158,11 @@ export class AmbientStage {
     this.#dirty = true;
   }
 
+  /** Stop gathering at the last position, without a pulse (cancel, blur, unmount). */
+  endPointer(): void {
+    this.setPointer(this.#pointerTarget[0], this.#pointerTarget[1], false);
+  }
+
   resetLook(): PostSettings {
     this.#dirty = true;
     return this.renderer.clearPost('bloom', 'grain', 'aberration', 'vignette', 'bloomThreshold');

@@ -1,12 +1,15 @@
 import type { SourceStatus } from '@ambient/sdk';
 import { SHADER_MANIFESTS } from '@ambient/shaders';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type Readout, SOURCE_OPTIONS } from './ambient.js';
 import { NoticeRegion } from './components/NoticeRegion.js';
 import { SavedLooks } from './components/SavedLooks.js';
 import { PHASE_LABEL, SourcePicker } from './components/SourcePicker.js';
 import { TuningPanel } from './components/TuningPanel.js';
 import { useAmbientStage } from './hooks/use-ambient-stage.js';
+import { useCanvasPointer } from './hooks/use-canvas-pointer.js';
+import { useIdleChrome, useShortcuts } from './hooks/use-experience-controls.js';
+import { useFullscreen } from './hooks/use-fullscreen.js';
 import { useNotices } from './hooks/use-notices.js';
 import { useSavedLooks } from './hooks/use-saved-looks.js';
 import { useSourceSelection } from './hooks/use-source-selection.js';
@@ -48,9 +51,6 @@ const shareEnvironment = (): ShareEnvironment => ({
   ...(typeof navigator.share === 'function' ? { share: (d) => navigator.share(d) } : {}),
   ...(navigator.clipboard ? { clipboard: navigator.clipboard } : {}),
 });
-const editable = (target: EventTarget | null) =>
-  target instanceof HTMLElement &&
-  (target.isContentEditable || /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(target.tagName));
 
 /** Everything decided once, before the stage exists. */
 function boot() {
@@ -72,7 +72,7 @@ export function App() {
   const panel = useRef<HTMLElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
-  const pointer = useRef<number | null>(null);
+  const main = useRef<HTMLElement>(null);
   const [{ capture, store, startup, device }] = useState(boot);
   const [initial] = useState(() => ({ settings: startup.settings, quality: device.quality }));
   const [settings, setSettings] = useState<ArtworkSettingsV1>(initial.settings);
@@ -84,7 +84,6 @@ export function App() {
   const [quality, setQuality] = useState<QualityMode>(initial.quality);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  const [idle, setIdle] = useState(false);
   const [paused, setPaused] = useState(false);
   const [readout, setReadout] = useState<Readout | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -131,24 +130,9 @@ export function App() {
     };
   }, [settings, capture, store, notify]);
 
-  useEffect(() => {
-    let timer = 0;
-    const wake = () => {
-      setIdle(false);
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        if (!panel.current?.contains(document.activeElement)) setIdle(true);
-      }, 7000);
-    };
-    for (const event of ['pointermove', 'pointerdown', 'keydown', 'focusin'])
-      window.addEventListener(event, wake);
-    wake();
-    return () => {
-      window.clearTimeout(timer);
-      for (const event of ['pointermove', 'pointerdown', 'keydown', 'focusin'])
-        window.removeEventListener(event, wake);
-    };
-  }, []);
+  const idle = useIdleChrome(main, !capture);
+  const pointer = useCanvasPointer(handle);
+  const fullscreen = useFullscreen(notify);
 
   /** Apply a complete look through the one ordered path; UI changes only after the stage agrees. */
   const applyLook = (next: ArtworkSettingsV1): boolean => {
@@ -289,84 +273,64 @@ export function App() {
     });
   };
 
+  // Focus follows the panel: into its heading on open, back to the opener on close, but only
+  // if focus was inside the panel, so closing never steals focus from elsewhere.
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpen.current) heading.current?.focus({ preventScroll: true });
+    wasOpen.current = open;
+  }, [open]);
+  const setPanelOpen = (next: boolean) => {
+    if (!next && panel.current?.contains(document.activeElement)) {
+      toggle.current?.focus({ preventScroll: true });
+    }
+    setOpen(next);
+  };
+  const setPanelOpenRef = useRef(setPanelOpen);
+  setPanelOpenRef.current = setPanelOpen;
+  // Escape closes the panel, the only app overlay, and is left alone while it is closed.
+  // Inline forms inside the panel stop Escape first, to cancel just themselves.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      setPanelOpenRef.current(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
   const pause = () => {
     const s = handle.current?.stage;
     if (!s) return;
     s.setPaused(!s.clock.paused);
     setPaused(s.clock.paused);
   };
-  const fullscreen = () => {
-    const action = document.fullscreenElement
-      ? document.exitFullscreen?.()
-      : document.documentElement.requestFullscreen?.();
-    void action?.catch(() => setError('Fullscreen is not available in this browser.'));
-  };
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setOpen(false);
-        toggle.current?.focus();
-        return;
-      }
-      if (editable(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === ' ') {
-        e.preventDefault();
-        handle.current?.stage.pulse(0.65);
-      } else if (e.key.toLowerCase() === 'p') pause();
-      else if (e.key.toLowerCase() === 'h') setOpen((v) => !v);
-      else if (e.key.toLowerCase() === 'f') fullscreen();
-      else if (/^[1-9]$/.test(e.key)) {
-        const next = SHADER_MANIFESTS[Number(e.key) - 1];
+  useShortcuts(
+    {
+      pulse: () => handle.current?.stage.pulse(0.65),
+      pause,
+      togglePanel: () => setPanelOpenRef.current(!open),
+      ...(fullscreen.supported ? { fullscreen: fullscreen.toggle } : {}),
+      scene: (index) => {
+        const next = SHADER_MANIFESTS[index];
         if (next) selectScene(next.id);
-      }
-    };
-    window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
-  });
-
-  const position = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return {
-      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
-    };
-  };
-  const release = (e: React.PointerEvent<HTMLCanvasElement>, pulse: boolean) => {
-    if (pointer.current !== e.pointerId) return;
-    pointer.current = null;
-    const p = position(e);
-    handle.current?.stage.setPointer(p.x, p.y, false);
-    if (pulse) handle.current?.stage.pulse(0.7, p);
-    if (e.currentTarget.hasPointerCapture(e.pointerId))
-      e.currentTarget.releasePointerCapture(e.pointerId);
-  };
-  const closePanel = useCallback(() => {
-    setOpen(false);
-    toggle.current?.focus();
-  }, []);
+      },
+    },
+    // Capture mode keeps its previous keyboard behavior; it only drops chrome and notices.
+    true,
+  );
 
   return (
-    <main className={`experience ${idle && !open ? 'is-idle' : ''} ${capture ? 'is-capture' : ''}`}>
+    <main
+      ref={main}
+      className={`experience ${idle && !open ? 'is-idle' : ''} ${capture ? 'is-capture' : ''}`}
+    >
       <canvas
         ref={canvas}
         className="stage"
         aria-label="Interactive generative artwork. Hold to gather light, release to send a pulse."
-        onPointerDown={(e) => {
-          if (pointer.current !== null) return;
-          pointer.current = e.pointerId;
-          e.currentTarget.setPointerCapture(e.pointerId);
-          const p = position(e);
-          handle.current?.stage.setPointer(p.x, p.y, true);
-        }}
-        onPointerMove={(e) => {
-          if (pointer.current === e.pointerId) {
-            const p = position(e);
-            handle.current?.stage.setPointer(p.x, p.y, true);
-          }
-        }}
-        onPointerUp={(e) => release(e, true)}
-        onPointerCancel={(e) => release(e, false)}
-        onLostPointerCapture={(e) => release(e, false)}
+        {...pointer}
       />
       <header className="masthead chrome">
         <a className="wordmark" href="./" aria-label="Ambient Art Protocol home">
@@ -386,7 +350,7 @@ export function App() {
             type="button"
             ref={toggle}
             className="round-button"
-            onClick={() => setOpen(!open)}
+            onClick={() => setPanelOpen(!open)}
             aria-label="Tune artwork"
             aria-expanded={open}
             aria-controls="tuning"
@@ -429,14 +393,16 @@ export function App() {
           >
             {paused ? '▷' : 'Ⅱ'}
           </button>
-          <button
-            type="button"
-            className="round-button fullscreen"
-            onClick={fullscreen}
-            aria-label="Fullscreen"
-          >
-            ⛶
-          </button>
+          {fullscreen.supported && (
+            <button
+              type="button"
+              className="round-button fullscreen"
+              onClick={fullscreen.toggle}
+              aria-label={fullscreen.active ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              ⛶
+            </button>
+          )}
         </div>
       </footer>
       <TuningPanel
@@ -447,7 +413,7 @@ export function App() {
         settings={settings}
         effectiveGlow={glow}
         quality={quality}
-        onClose={closePanel}
+        onClose={() => setPanelOpen(false)}
         onScene={selectScene}
         onPalette={setPalette}
         onForm={setForm}
@@ -506,7 +472,7 @@ export function App() {
             </p>
           )
         }
-        shortcuts="1–6 scenes · P pause · F fullscreen · Space pulse"
+        shortcuts={`1–${SHADER_MANIFESTS.length} scenes · P pause · H panel${fullscreen.supported ? ' · F fullscreen' : ''} · Space pulse`}
       />
       {!capture && <NoticeRegion notice={notice} onDismiss={dismiss} />}
       {error && (

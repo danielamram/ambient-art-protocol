@@ -76,8 +76,8 @@ a {
 }
 .masthead {
   top: max(30px, env(safe-area-inset-top));
-  left: 40px;
-  right: 40px;
+  left: max(40px, env(safe-area-inset-left));
+  right: max(40px, env(safe-area-inset-right));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -123,8 +123,8 @@ a {
   background: #849790;
 }
 .round-button {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border: 1px solid var(--line);
   border-radius: 50%;
   font-size: 20px;
@@ -138,7 +138,7 @@ a {
   border-color: #bcebd855;
 }
 .art-caption {
-  left: 42px;
+  left: max(42px, env(safe-area-inset-left));
   bottom: 133px;
   max-width: 370px;
   pointer-events: none;
@@ -164,8 +164,8 @@ h1 {
 }
 .bottom {
   bottom: max(30px, env(safe-area-inset-bottom));
-  left: 40px;
-  right: 40px;
+  left: max(40px, env(safe-area-inset-left));
+  right: max(40px, env(safe-area-inset-right));
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -223,12 +223,21 @@ h1 {
 .panel {
   position: fixed;
   z-index: 4;
-  right: 28px;
-  top: 90px;
+  right: max(28px, env(safe-area-inset-right));
+  top: max(90px, calc(env(safe-area-inset-top) + 64px));
   bottom: auto;
   width: 310px;
-  max-height: calc(100dvh - 120px);
+  /* Ends above the footer transport so Pause stays reachable while tuning. */
+  max-height: calc(
+    100dvh -
+    max(90px, calc(env(safe-area-inset-top) + 64px)) -
+    max(30px, env(safe-area-inset-bottom)) -
+    64px
+  );
   overflow: auto;
+  /* Scrolling the panel never scrolls or gestures through to the canvas behind it. */
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   padding: 25px;
   background: #091111e8;
   border: 1px solid var(--line);
@@ -253,9 +262,16 @@ h1 {
   margin: 8px 0 0;
 }
 .panel-heading .round-button {
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   font-size: 19px;
+}
+.panel-heading h2:focus {
+  outline: none;
+}
+.panel-heading h2:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
 }
 .select-label {
   display: grid;
@@ -396,8 +412,8 @@ summary {
 @media (max-width: 600px) {
   .masthead {
     top: max(20px, env(safe-area-inset-top));
-    left: 22px;
-    right: 22px;
+    left: max(22px, env(safe-area-inset-left));
+    right: max(22px, env(safe-area-inset-right));
   }
   .header-right {
     gap: 15px;
@@ -419,8 +435,8 @@ summary {
     font-size: 10px;
   }
   .bottom {
-    left: 18px;
-    right: 18px;
+    left: max(18px, env(safe-area-inset-left));
+    right: max(18px, env(safe-area-inset-right));
     bottom: max(23px, env(safe-area-inset-bottom));
     display: grid;
     gap: 16px;
@@ -448,26 +464,43 @@ summary {
     font-size: 9px;
   }
   .transport .round-button {
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
     font-size: 15px;
   }
   .fullscreen {
     display: none;
   }
   .panel {
-    top: 78px;
-    right: 16px;
+    top: max(78px, calc(env(safe-area-inset-top) + 64px));
+    right: max(16px, env(safe-area-inset-right));
     width: min(310px, calc(100vw - 32px));
-    max-height: calc(100dvh - 100px);
+    max-height: calc(
+      100dvh -
+      max(78px, calc(env(safe-area-inset-top) + 64px)) -
+      max(16px, env(safe-area-inset-bottom))
+    );
+    padding: 20px;
+    gap: 20px;
   }
   .wordmark {
     font-size: 11px;
   }
 }
+@media (max-width: 360px) {
+  .collection button {
+    font-size: 8.5px;
+    padding: 12px 3px;
+    gap: 4px;
+  }
+  .header-right {
+    gap: 10px;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .chrome,
-  .collection button {
+  .collection button,
+  .notice {
     transition: none;
   }
   .is-idle .chrome {
