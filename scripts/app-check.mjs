@@ -463,10 +463,12 @@ try {
       assert.equal(await liveLabel(page).textContent(), 'Connecting');
       await page.locator('.look', { hasText: 'Quiet' }).locator('.look-load').click();
       assert.equal(await liveLabel(page).textContent(), 'Autonomous');
+      // The abort ends the connection attempt itself; it does not wait for the stream to settle.
+      await until(page, () => window.__aapStage.sourceStatus('wikipedia-edits') === 'stopped');
       release();
       await page.waitForTimeout(300);
       assert.equal(await liveLabel(page).textContent(), 'Autonomous');
-      assert.notEqual(await status('wikipedia-edits'), 'running');
+      assert.equal(await status('wikipedia-edits'), 'stopped');
 
       // Rapid A -> B -> Autonomous settles with nothing running and no stale status.
       mode = 'hang';

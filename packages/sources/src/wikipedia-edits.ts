@@ -124,9 +124,13 @@ export const wikipediaEdits = createSource<WikipediaEditsConfig | undefined>({
     // Resolve only once the stream is actually open, so 'running' means connected.
     // After that, EventSource reconnects on its own, so later errors are not fatal.
     try {
-      await waitForOpen(es, 'Wikimedia EventStreams', cfg.connectTimeoutMs ?? 15000);
+      await waitForOpen(es, 'Wikimedia EventStreams', cfg.connectTimeoutMs ?? 15000, {
+        signal: ctx.signal,
+      });
     } catch (err) {
       es.close();
+      // Stopped while connecting: not a failure. The SDK sees the abort and ends 'stopped'.
+      if (ctx.signal.aborted) return undefined;
       throw err;
     }
 

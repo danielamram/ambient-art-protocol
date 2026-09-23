@@ -41,4 +41,35 @@ describe('waitForOpen', () => {
     vi.advanceTimersByTime(500);
     await expect(p).rejects.toThrow('no connection after 500 ms');
   });
+
+  it('rejects at once with an AbortError when the signal aborts mid-connect', async () => {
+    const s = fake();
+    const abort = new AbortController();
+    const p = waitForOpen(s, 'thing', 15000, { signal: abort.signal });
+    abort.abort();
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+    // The timeout was cleared, and a late open changes nothing.
+    expect(vi.getTimerCount()).toBe(0);
+    s.onopen?.({});
+  });
+
+  it('rejects immediately when the signal is already aborted', async () => {
+    const abort = new AbortController();
+    abort.abort();
+    const p = waitForOpen(fake(), 'thing', 15000, { signal: abort.signal });
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('ignores an abort after the socket opened', async () => {
+    const s = fake();
+    const abort = new AbortController();
+    const onClose = vi.fn();
+    const p = waitForOpen(s, 'thing', 1000, { signal: abort.signal, onClose });
+    s.onopen?.({});
+    await expect(p).resolves.toBeUndefined();
+    abort.abort();
+    s.onclose?.({});
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

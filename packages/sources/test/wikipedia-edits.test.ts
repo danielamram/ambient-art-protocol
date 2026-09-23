@@ -144,4 +144,37 @@ describe('wikipediaEdits source', () => {
       g.EventSource = saved;
     }
   });
+
+  it('stops promptly while still connecting: socket closed, "stopped", never live', async () => {
+    const bus = new DataSignalBus();
+    const seen: VisualSignal[] = [];
+    bus.stream$.subscribe((sig) => seen.push(sig));
+    const src = wikipediaEdits({ EventSource: FakeEventSource, connectTimeoutMs: 15000 });
+    const starting = src.start(bus);
+    const es = FakeEventSource.instances[0];
+    expect(src.status).toBe('starting');
+    // No open, error or timeout: stop must not wait for any of them.
+    await src.stop();
+    await expect(starting).resolves.toBeUndefined();
+    expect(src.status).toBe('stopped');
+    expect(es?.closed).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    es?.open();
+    vi.advanceTimersByTime(20000);
+    expect(src.status).toBe('stopped');
+    expect(seen).toHaveLength(0);
+  });
+
+  it('can start again after being stopped while connecting', async () => {
+    const src = wikipediaEdits({ EventSource: FakeEventSource });
+    const bus = new DataSignalBus();
+    const first = src.start(bus);
+    await src.stop();
+    await first;
+    const second = src.start(bus);
+    FakeEventSource.instances[1]?.open();
+    await second;
+    expect(src.status).toBe('running');
+    await src.stop();
+  });
 });

@@ -119,12 +119,12 @@ to a URL without a look changes nothing. Links never start a live source.
 - Loading a saved or shared look while a source is live returns to Autonomous first, with a
   short notice.
 
-**SDK limitation:** `waitForOpen` in `packages/sources/src/connect.ts` does not observe
-`ctx.signal`. The coordinator aborts a superseded source immediately, and an aborted source
-cannot emit, so late events cannot affect the art. But `Source.stop()` on a source that is
-still connecting waits until the connection opens, fails, or times out (15 s by default)
-before it resolves. A later selection starts after that. Fixing this belongs in the sources
-package: reject `waitForOpen` and close the socket on abort.
+**Stopping while connecting:** `waitForOpen` in `packages/sources/src/connect.ts` takes the
+source's `ctx.signal`. When a source is stopped mid-connect, the built-in sources close their
+socket and settle at once as `stopped` (not `error`), so the next selection starts without
+waiting for the 15 s connect timeout. Third-party plugins that ignore `ctx.signal` still delay
+their own `stop()` until their `start()` settles; the coordinator's abort still prevents them
+from emitting.
 
 ## Input and accessibility
 

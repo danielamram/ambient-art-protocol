@@ -137,6 +137,7 @@ export const binanceTrades = createSource<BinanceTradesConfig | undefined>({
     // so report it through ctx.fail and let the user toggle the source to reconnect.
     try {
       await waitForOpen(ws, `Binance ${symbol}@trade`, cfg.connectTimeoutMs ?? 15000, {
+        signal: ctx.signal,
         onClose: () => {
           if (!ctx.signal.aborted)
             ctx.fail(new Error(`Binance ${symbol}@trade: connection closed`));
@@ -144,6 +145,8 @@ export const binanceTrades = createSource<BinanceTradesConfig | undefined>({
       });
     } catch (err) {
       ws.close();
+      // Stopped while connecting: not a failure. The SDK sees the abort and ends 'stopped'.
+      if (ctx.signal.aborted) return undefined;
       throw err;
     }
 

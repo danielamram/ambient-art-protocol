@@ -14,7 +14,7 @@ export const AUTONOMOUS: SourceView = { selected: '', phase: 'autonomous' };
 export interface SourceDriver {
   /** Resolves once the source is running; rejects if it could not start. */
   start(id: string): Promise<void>;
-  /** Idempotent. Aborts an in-flight start as far as the SDK allows (see docs/app-experience.md). */
+  /** Idempotent. Also aborts an in-flight start; built-in sources then settle promptly. */
   stop(id: string): Promise<void>;
   /** Re-emit the user's *current* palette and a neutral current. Must read latest settings. */
   restoreAutonomous(): void;
