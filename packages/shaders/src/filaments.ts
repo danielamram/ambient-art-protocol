@@ -69,7 +69,10 @@ vec3 project(vec3 p) {
   vec2 wake = (u_gesture.xy - 0.5) * vec2(aspect, -1.0);
   vec2 distanceToWake = xy - wake;
   float influence = exp(-dot(distanceToWake, distanceToWake) * 10.0);
-  xy += u_gesture.zw * vec2(aspect, -1.0) * influence * 0.3;
+  vec2 wakeOffset = u_gesture.zw * vec2(aspect, -1.0) * influence * 0.65;
+  // Smoothly compress the wake near the frame instead of clipping whole strands.
+  vec2 margin = max(vec2(0.0), vec2(aspect, 1.0) * 0.46 - abs(xy));
+  xy += wakeOffset * margin / (margin + abs(wakeOffset) + vec2(0.00001));
 #endif
   for (int i = 0; i < 8; i++) {
     vec4 pulse = u_pulses[i];

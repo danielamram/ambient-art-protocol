@@ -112,6 +112,9 @@ try {
     }
   }
   // Hold shader time fixed to isolate elastic memory from choreography.
+  // The integration assertions do not need full geometry density. The full-detail
+  // phases above and the separate 24-case harness cover shader quality variants.
+  await page.evaluate(() => window.study.renderer.setShaderQuality(0));
   const result = await page.evaluate(() => {
     const baseline = window.draw(20);
     for (let i = 0; i < 30; i++) window.draw(20, 0.45, 0, [0.35 + i / 100, 0.5, 1]);
