@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { SourceOption } from '../ambient.js';
 import type { SourceView } from '../state/source-coordinator.js';
 
@@ -14,12 +15,15 @@ export function SourcePicker({
   disabled,
   onSelect,
   onRetry,
+  children,
 }: {
   options: readonly SourceOption[];
   view: SourceView;
   disabled: boolean;
   onSelect(id: string): void;
   onRetry(): void;
+  /** Settings for the selected source, shown under the picker. */
+  children?: ReactNode;
 }) {
   const selected = options.find((o) => o.id === view.selected);
   return (
@@ -45,6 +49,7 @@ export function SourcePicker({
           ? `${PHASE_LABEL[view.phase]}. ${selected.description} Live data shifts the palette, motion and pulses of the look you chose.`
           : 'Live data can influence the selected look. Links and saved looks never start a feed.'}
       </p>
+      {children}
       {view.phase === 'unavailable' && (
         <div className="source-failure" role="alert">
           <span>Source unavailable. The artwork keeps running on its own.</span>

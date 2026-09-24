@@ -1,7 +1,7 @@
 import type { SourceStatus } from '@ambient/sdk';
 import { SHADER_MANIFESTS } from '@ambient/shaders';
 import { useEffect, useRef, useState } from 'react';
-import { type Readout, SOURCE_OPTIONS } from './ambient.js';
+import { blueskyWatch, type Readout, SOURCE_OPTIONS } from './ambient.js';
 import { Diagnostics } from './components/Diagnostics.js';
 import { NoticeRegion } from './components/NoticeRegion.js';
 import { Presets } from './components/Presets.js';
@@ -9,6 +9,7 @@ import { SavedLooks } from './components/SavedLooks.js';
 import { SignalScope } from './components/SignalScope.js';
 import { PHASE_LABEL, SourcePicker } from './components/SourcePicker.js';
 import { TuningPanel } from './components/TuningPanel.js';
+import { WatchedWord } from './components/WatchedWord.js';
 import { useAmbientStage } from './hooks/use-ambient-stage.js';
 import { useCanvasPointer } from './hooks/use-canvas-pointer.js';
 import { useIdleChrome, useShortcuts } from './hooks/use-experience-controls.js';
@@ -90,6 +91,7 @@ export function App() {
   const [quality, setQuality] = useState<QualityMode>(initial.quality);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [watchedWord, setWatchedWord] = useState(blueskyWatch.word);
   const [paused, setPaused] = useState(false);
   const [readout, setReadout] = useState<Readout | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -481,7 +483,17 @@ export function App() {
               disabled={capture}
               onSelect={(id) => void sources.select(id)}
               onRetry={() => void sources.retry()}
-            />
+            >
+              {sources.view.selected === 'bluesky-jetstream' && (
+                <WatchedWord
+                  value={watchedWord}
+                  onChange={(word) => {
+                    setWatchedWord(word);
+                    blueskyWatch.word = word;
+                  }}
+                />
+              )}
+            </SourcePicker>
             <Presets presets={SOURCE_PRESETS} disabled={capture} onApply={applyPreset} />
             <SignalScope
               scope={scope.scope}
