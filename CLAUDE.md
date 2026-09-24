@@ -96,7 +96,7 @@ pnpm test:app     # Chromium app flows: looks, links, keyboard, sources, mobile
   sources can feed a browser renderer. Plugins that die after starting call `ctx.fail(err)`.
 - Phase 5 (partial): `apps/web` has the panel, cinema mode, keyboard shortcuts, drag-to-steer,
   typed settings with one ordered apply path, share links (`#look=1&…`), local saved looks,
-  latest-request-wins source selection, and diagnostics. Still to do: signal scope sparklines,
+  latest-request-wins source selection, signal scope sparklines, and diagnostics. Still to do:
   source presets, recorder/replayer. Exact replay, seeds and export need renderer contracts.
 
 ## Visual collection update

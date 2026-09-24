@@ -18,7 +18,7 @@ See `visual-refinement.md` for those.
 - `src/stage-adapter.ts`: maps `ArtworkStage` and `SourceDriver` onto `AmbientStage`.
 - `src/hooks/*`: stage lifecycle, source selection, saved looks, notices, shortcuts, cinema
   mode, the canvas pointer and fullscreen.
-- `src/components/*`: `TuningPanel`, `SavedLooks`, `SourcePicker`, `Diagnostics`,
+- `src/components/*`: `TuningPanel`, `SavedLooks`, `SourcePicker`, `SignalScope`, `Diagnostics`,
   `NoticeRegion`, `Slider`.
 
 ## Settings
@@ -119,12 +119,28 @@ to a URL without a look changes nothing. Links never start a live source.
 - Loading a saved or shared look while a source is live returns to Autonomous first, with a
   short notice.
 
-**SDK limitation:** `waitForOpen` in `packages/sources/src/connect.ts` does not observe
-`ctx.signal`. The coordinator aborts a superseded source immediately, and an aborted source
-cannot emit, so late events cannot affect the art. But `Source.stop()` on a source that is
-still connecting waits until the connection opens, fails, or times out (15 s by default)
-before it resolves. A later selection starts after that. Fixing this belongs in the sources
-package: reject `waitForOpen` and close the socket on abort.
+**Stopping while connecting:** `waitForOpen` in `packages/sources/src/connect.ts` takes the
+source's `ctx.signal`. When a source is stopped mid-connect, the built-in sources close their
+socket and settle at once as `stopped` (not `error`), so the next selection starts without
+waiting for the 15 s connect timeout. Third-party plugins that ignore `ctx.signal` still delay
+their own `stop()` until their `start()` settles; the coordinator's abort still prevents them
+from emitting.
+
+## Signal scope
+
+"Signal scope" under the source picker shows sparklines of what reaches the bus. It shows the
+input to the artwork, not the rendered result.
+
+- **Channels:** Pulses (the strongest in each bucket), Mood, Turbulence and Current
+  velocity. Values are already normalized to [0, 1] on the wire.
+- **Sources:** everything on the bus is included: live feeds, your taps and the palette.
+- **Recording:** `state/signal-scope.ts` records each signal in O(1) from the moment the
+  stage is created, so the current mood is known as soon as the scope opens.
+- **Sampling:** only while the scope is expanded inside an open panel. It samples every
+  250 ms (15 s of history), or every 1 s with reduced motion (60 s). It pauses in hidden
+  tabs and never runs per frame. Collapsing the scope stops React updates.
+- **Accessibility:** graphs are `aria-hidden` SVG, and each row shows its latest value as
+  text. Nothing is announced as values change.
 
 ## Input and accessibility
 
@@ -196,7 +212,7 @@ handle; production builds strip it. It covers:
 - Source failure, retry, pending start versus a loaded look, and rapid switching, using a
   routed fake Wikimedia stream.
 - 390 px and 320 px layouts; reduced motion; unsupported fullscreen.
-- Diagnostics; capture and legacy URLs.
+- The signal scope; diagnostics; capture and legacy URLs.
 
 Screenshots go to `artifacts/app-check/`.
 

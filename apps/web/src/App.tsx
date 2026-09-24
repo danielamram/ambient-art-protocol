@@ -5,6 +5,7 @@ import { type Readout, SOURCE_OPTIONS } from './ambient.js';
 import { Diagnostics } from './components/Diagnostics.js';
 import { NoticeRegion } from './components/NoticeRegion.js';
 import { SavedLooks } from './components/SavedLooks.js';
+import { SignalScope } from './components/SignalScope.js';
 import { PHASE_LABEL, SourcePicker } from './components/SourcePicker.js';
 import { TuningPanel } from './components/TuningPanel.js';
 import { useAmbientStage } from './hooks/use-ambient-stage.js';
@@ -13,6 +14,7 @@ import { useIdleChrome, useShortcuts } from './hooks/use-experience-controls.js'
 import { useFullscreen } from './hooks/use-fullscreen.js';
 import { useNotices } from './hooks/use-notices.js';
 import { useSavedLooks } from './hooks/use-saved-looks.js';
+import { useSignalScope } from './hooks/use-signal-scope.js';
 import { useSourceSelection } from './hooks/use-source-selection.js';
 import { applySettings } from './state/apply-settings.js';
 import {
@@ -94,7 +96,11 @@ export function App() {
   const active = SHADER_MANIFESTS.find((m) => m.id === settings.scene) ?? SHADER_MANIFESTS[0];
 
   const sourceStatus = useRef<(id: string, s: SourceStatus) => void>(() => undefined);
+  // The scope samples only while someone can see it: expanded, in an open panel.
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const scope = useSignalScope(open && scopeOpen && !capture);
   const { handle, mounted } = useAmbientStage(canvas, initial, {
+    onCreated: (stage) => scope.attach(stage.bus),
     onReadout: setReadout,
     onError: setError,
     onSourceStatus: (id, s) => sourceStatus.current(id, s),
@@ -133,6 +139,7 @@ export function App() {
   }, [settings, capture, store, notify]);
 
   const idle = useIdleChrome(main, !capture);
+
   const pointer = useCanvasPointer(handle);
   const fullscreen = useFullscreen(notify);
 
@@ -459,13 +466,21 @@ export function App() {
           />
         }
         source={
-          <SourcePicker
-            options={SOURCE_OPTIONS}
-            view={sources.view}
-            disabled={capture}
-            onSelect={(id) => void sources.select(id)}
-            onRetry={() => void sources.retry()}
-          />
+          <>
+            <SourcePicker
+              options={SOURCE_OPTIONS}
+              view={sources.view}
+              disabled={capture}
+              onSelect={(id) => void sources.select(id)}
+              onRetry={() => void sources.retry()}
+            />
+            <SignalScope
+              scope={scope.scope}
+              windowSeconds={scope.windowSeconds}
+              open={scopeOpen}
+              onToggle={setScopeOpen}
+            />
+          </>
         }
         diagnostics={
           <Diagnostics
