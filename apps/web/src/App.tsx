@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { type Readout, SOURCE_OPTIONS } from './ambient.js';
 import { Diagnostics } from './components/Diagnostics.js';
 import { NoticeRegion } from './components/NoticeRegion.js';
+import { Presets } from './components/Presets.js';
 import { SavedLooks } from './components/SavedLooks.js';
 import { SignalScope } from './components/SignalScope.js';
 import { PHASE_LABEL, SourcePicker } from './components/SourcePicker.js';
@@ -44,6 +45,7 @@ import {
   STORAGE_KEYS,
   writeJson,
 } from './state/look-storage.js';
+import { SOURCE_PRESETS, type SourcePreset } from './state/presets.js';
 import { copyText, type ShareEnvironment, shareLink } from './state/share.js';
 
 const COLLECTION = SHADER_MANIFESTS.slice(0, 3);
@@ -176,6 +178,12 @@ export function App() {
     const text = parts.filter(Boolean).join(' ');
     if (text) notify(text);
     return true;
+  };
+  /** An explicit click on a pairing: apply its look, then start its feed. */
+  const applyPreset = (preset: SourcePreset) => {
+    if (!applyLook(preset.settings)) return;
+    setLoadedId(null);
+    void sources.select(preset.source);
   };
   const selectScene = (id: string) => {
     if (id !== settingsRef.current.scene) applyLook(withScene(settingsRef.current, id));
@@ -474,6 +482,7 @@ export function App() {
               onSelect={(id) => void sources.select(id)}
               onRetry={() => void sources.retry()}
             />
+            <Presets presets={SOURCE_PRESETS} disabled={capture} onApply={applyPreset} />
             <SignalScope
               scope={scope.scope}
               windowSeconds={scope.windowSeconds}

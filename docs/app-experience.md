@@ -126,6 +126,22 @@ waiting for the 15 s connect timeout. Third-party plugins that ignore `ctx.signa
 their own `stop()` until their `start()` settles; the coordinator's abort still prevents them
 from emitting.
 
+## Pairings (source presets)
+
+"Pairings" under the source picker are curated combinations of a built-in feed with a look
+built from existing controls (`state/presets.ts`):
+
+- Edit tide: Wikipedia edits with Resonant Silk.
+- Market ember: BTC/USDT trades with Chromatic Ink.
+- Rehearsal: simulated signals with Living Filaments; works offline.
+
+Clicking a pairing applies its look through `applySettings()` and then selects its feed
+through the source coordinator. It is the only way a feed starts together with a look, and
+only from that explicit click. Links and saved looks still never start a feed. A feed that
+can't connect keeps the look and shows "Source unavailable" with Retry. Pairings are
+disabled in capture mode. Each preset's settings are unit-tested to validate unchanged
+against the scene registry.
+
 ## Signal scope
 
 "Signal scope" under the source picker shows sparklines of what reaches the bus. It shows the
@@ -201,7 +217,7 @@ pnpm test:app       # app flows in Chromium
 If the Playwright-managed Chromium does not match the installed Playwright version, set
 `CHROMIUM_PATH=/absolute/path/to/chromium` for both browser commands.
 
-`pnpm test:app` starts its own loopback Vite server and aborts all non-loopback requests.
+`pnpm test:app` starts its own loopback Vite server and aborts all non-loopback requests and WebSockets.
 It stubs `requestAnimationFrame` as `test:visual` does, and uses a dev-only `window.__aapStage`
 handle; production builds strip it. It covers:
 
@@ -212,7 +228,7 @@ handle; production builds strip it. It covers:
 - Source failure, retry, pending start versus a loaded look, and rapid switching, using a
   routed fake Wikimedia stream.
 - 390 px and 320 px layouts; reduced motion; unsupported fullscreen.
-- The signal scope; diagnostics; capture and legacy URLs.
+- Pairings; the signal scope; diagnostics; capture and legacy URLs.
 
 Screenshots go to `artifacts/app-check/`.
 

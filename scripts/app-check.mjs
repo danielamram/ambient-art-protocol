@@ -50,6 +50,11 @@ async function open(path = '/', options = {}, init) {
     (url) => url.hostname !== '127.0.0.1',
     (route) => route.abort(),
   );
+  // HTTP routing does not see WebSockets: fail those too (Vite's own HMR socket is loopback).
+  await context.routeWebSocket(
+    (url) => url.hostname !== '127.0.0.1',
+    (ws) => ws.close(),
+  );
   const page = await context.newPage();
   page.on('pageerror', (e) => pageErrors.push(`${path}: ${e.message}`));
   page.on('console', (m) => {
@@ -484,6 +489,39 @@ try {
       await context.close();
     },
   );
+
+  await step('pairings apply their look and start only their own feed', async () => {
+    const { context, page } = await open('/');
+    await openPanel(page);
+    const picker = page.getByLabel('Driven by');
+    const pairing = (name) => page.locator('.preset', { hasText: name });
+    // Before any click, nothing is live.
+    assert.equal(await liveLabel(page).textContent(), 'Autonomous');
+
+    await pairing('Rehearsal').click();
+    await until(page, () => document.querySelector('.live-label')?.textContent === 'Live signal');
+    assert.equal(await page.locator('h1').textContent(), 'Living Filaments');
+    assert.equal(await pressed(page, 'Iris'), 'true');
+    assert.equal(await picker.inputValue(), 'mock');
+
+    // Feeds that cannot connect (all outside traffic is blocked here) are reported truthfully,
+    // and the look still applies.
+    for (const [name, scene, source] of [
+      ['Edit tide', 'Resonant Silk', 'wikipedia-edits'],
+      ['Market ember', 'Chromatic Ink', 'binance-trades'],
+    ]) {
+      await pairing(name).click();
+      assert.equal(await page.locator('h1').textContent(), scene);
+      assert.equal(await picker.inputValue(), source);
+      await until(
+        page,
+        () => document.querySelector('.live-label')?.textContent === 'Source unavailable',
+      );
+      assert.equal(await stage(page, () => window.__aapStage.sourceStatus('mock')), 'stopped');
+    }
+    assert.equal(await pressed(page, 'Ember'), 'true');
+    await context.close();
+  });
 
   await step('signal scope: samples the bus only while expanded, and graphs signals', async () => {
     const { context, page } = await open('/');
