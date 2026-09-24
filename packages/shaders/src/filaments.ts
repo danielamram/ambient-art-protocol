@@ -160,12 +160,5 @@ export const livingFilaments: ShaderManifest = {
   geometry: geometry(false),
   post: { bloom: 0.22, bloomThreshold: 0.52, grain: 0.06, aberration: 0.015, vignette: 0.2 },
 };
-export const resonantSilk: ShaderManifest = {
-  id: 'resonant-silk',
-  name: 'Resonant Silk',
-  description: 'An interference landscape. Fine threads fold into a standing wave.',
-  fragment: background,
-  uniforms: STANDARD_DECLARATIONS,
-  geometry: geometry(true),
-  post: { bloom: 0.23, bloomThreshold: 0.52, grain: 0.05, aberration: 0, vignette: 0.18 },
-};
+// Preserve the existing public import path while Silk owns a separate material.
+export { resonantSilk } from './resonant-silk.js';
