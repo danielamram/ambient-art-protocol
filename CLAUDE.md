@@ -32,8 +32,10 @@ Read `docs/brainstorm.md` for the design critique and the reasoning behind the d
   `post/shaders.ts`, `quality.ts`, `energy.ts`) are unit-tested in Node; only `renderer.ts` and
   `gl/targets.ts` touch WebGL.
 - `packages/sources` (`@ambient/sources`): built-in plugins. Shipped: `wikipedia-edits` (Wikimedia
-  EventStreams over SSE) and `binance-trades` (public WebSocket), both keyless and browser-native,
-  with injectable `EventSource`/`WebSocket` constructors for tests and Node. `waitForOpen` makes
+  EventStreams over SSE), `binance-trades` (public WebSocket), `bluesky-jetstream` (Jetstream
+  WebSocket, optional live `watch()` word), `usgs-earthquakes` and `space-weather` (NOAA SWPC),
+  the last two polled JSON through `poll.ts`. All keyless and browser-native, with injectable
+  `EventSource`/`WebSocket`/`fetch` for tests and Node. `waitForOpen` makes
   `start()` resolve only once connected, so 'running' means live.
 - `packages/shaders` (`@ambient/shaders`): GLSL ES 3.00 themes as `ShaderManifest` objects.
   Shipped: `aurora-drift` (warped light curtains), `fluid-field` (feedback-advected ink), and
@@ -91,7 +93,8 @@ pnpm test:app     # Chromium app flows: looks, links, keyboard, sources, mobile
 - Phase 3 (done): `CanvasRenderer` with the post stack (feedback, bloom, tonemap, grain),
   adaptive `QualityController`, and the `aurora-drift`, `fluid-field` (feedback-advected ink,
   not a Navier-Stokes solver) and `cybernetic-mesh` themes.
-- Phase 4 (partial): `wikipedia-edits` and `binance-trades` are done and toggleable in the web app.
+- Phase 4 (partial): `wikipedia-edits`, `binance-trades`, `bluesky-jetstream`, `usgs-earthquakes`
+  and `space-weather` are done and toggleable in the web app.
   Still to do: `webhook-pulse` (Node HTTP endpoint) plus the WebSocket relay transport so Node-side
   sources can feed a browser renderer. Plugins that die after starting call `ctx.fail(err)`.
 - Phase 5 (partial): `apps/web` has the panel, cinema mode, keyboard shortcuts, drag-to-steer,

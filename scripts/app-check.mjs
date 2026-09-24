@@ -523,6 +523,103 @@ try {
     await context.close();
   });
 
+  await step(
+    'new feeds run end to end on routed fixtures; watched word filters Bluesky',
+    async () => {
+      const { context, page } = await open('/');
+      const cors = { 'access-control-allow-origin': '*' };
+      const json = (body) => ({
+        contentType: 'application/json',
+        headers: cors,
+        body: JSON.stringify(body),
+      });
+      const quake = (id, mag, lon, lat, depth, time) => ({
+        type: 'Feature',
+        id,
+        properties: { mag, time },
+        geometry: { type: 'Point', coordinates: [lon, lat, depth] },
+      });
+      await context.route('**/earthquake.usgs.gov/**', (route) =>
+        route.fulfill(
+          json({
+            type: 'FeatureCollection',
+            features: [quake('a', 4.8, 142, 38, 20, 1), quake('b', 2.1, -118, 34, 8, 2)],
+          }),
+        ),
+      );
+      await context.route('**/services.swpc.noaa.gov/**', (route) => {
+        const url = route.request().url();
+        if (url.includes('planetary_k_index'))
+          return route.fulfill(json([{ time_tag: 't', kp_index: 5, estimated_kp: 5.33 }]));
+        if (url.includes('plasma'))
+          return route.fulfill(
+            json([
+              ['time_tag', 'density', 'speed', 'temperature'],
+              ['t', '5', '620', '1'],
+            ]),
+          );
+        return route.fulfill(
+          json([
+            ['time_tag', 'bx_gsm', 'by_gsm', 'bz_gsm', 'lon_gsm', 'lat_gsm', 'bt'],
+            ['t', '1', '3', '-7', '0', '0', '8'],
+          ]),
+        );
+      });
+      let jetstream;
+      await context.routeWebSocket(/jetstream/, (ws) => {
+        jetstream = ws;
+      });
+      const post = (text) =>
+        JSON.stringify({
+          kind: 'commit',
+          commit: {
+            operation: 'create',
+            collection: 'app.bsky.feed.post',
+            record: { text, langs: ['en'] },
+          },
+        });
+      await countPulses(page);
+      await openPanel(page);
+      const pairing = (name) => page.locator('.preset', { hasText: name });
+      const liveNow = () =>
+        until(page, () => document.querySelector('.live-label')?.textContent === 'Live signal');
+
+      await pairing('Seismic memory').click();
+      await liveNow();
+      assert.equal(await page.locator('h1').textContent(), 'Resonant Silk');
+      assert.ok((await pulses(page)) >= 2, 'recent quakes replay as pulses');
+
+      await pairing('Aurora mirror').click();
+      await liveNow();
+      assert.equal(await page.locator('h1').textContent(), 'Aurora Drift');
+      assert.equal(
+        await stage(page, () => window.__aapStage.sourceStatus('usgs-earthquakes')),
+        'stopped',
+      );
+
+      await pairing('Bluesky heartbeat').click();
+      await liveNow();
+      assert.ok(jetstream, 'connected to the mock Jetstream');
+      assert.match(jetstream.url(), /wantedCollections=app\.bsky\.feed\.post/);
+      const word = page.getByLabel('Watch a word (optional)');
+      await word.fill('');
+      await word.pressSequentially('hope');
+      assert.equal(await stage(page, () => window.__aapStage.clock.paused), false);
+      assert.equal(await page.locator('#tuning').isVisible(), true);
+      const before = await pulses(page);
+      jetstream.send(post('sunny day'));
+      jetstream.send(post('Hope springs'));
+      jetstream.send(post('hopeful, not a match'));
+      await until(page, (n) => window.__pulses === n + 1, before);
+      await page.waitForTimeout(200);
+      assert.equal(await pulses(page), before + 1);
+      await page.getByText('Only posts saying “hope” pulse.').waitFor();
+      await page.getByLabel('Driven by').selectOption('');
+      assert.equal(await word.count(), 0);
+      await context.close();
+    },
+  );
+
   await step('signal scope: samples the bus only while expanded, and graphs signals', async () => {
     const { context, page } = await open('/');
     await openPanel(page);

@@ -83,9 +83,17 @@ pnpm install
 pnpm dev:web   # http://localhost:5173
 ```
 
-Switch on a live source: **Wikipedia edits** (every human edit on Wikimedia, over Server-Sent
-Events) or **BTC/USDT trades** (Binance public WebSocket). Both are free, need no key, and run in
-the browser. Hold and release the canvas to send a pulse by hand. Sources still emit normalized signals on
+Switch on a live source. All are free, need no key, and run in the browser:
+
+- **Wikipedia edits**: every human edit on Wikimedia, over Server-Sent Events.
+- **BTC/USDT trades**: the Binance public trade WebSocket.
+- **Bluesky**: public posts, reposts and follows from Jetstream. Each language gathers in its own
+  zone, emoji set the mood, and an optional watched word makes only matching posts pulse.
+- **Earthquakes (USGS)**: quakes worldwide pulse where they strike, sized by magnitude.
+- **Space weather (NOAA)**: geomagnetic activity and the solar wind; the art grows restless when
+  the real aurora does.
+
+ Hold and release the canvas to send a pulse by hand. Sources still emit normalized signals on
 the same bus; local form, pointer, and playback controls belong to the renderer.
 
 Tune the look from the panel, save it on this device, or share it as a link

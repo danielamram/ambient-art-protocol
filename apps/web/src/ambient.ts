@@ -11,7 +11,13 @@ import {
 import { DataSignalBus, type Source, SourceRegistry, type SourceStatus } from '@ambient/sdk';
 import { createMockSource } from '@ambient/sdk/testing';
 import { findShader, livingFilaments, SHADER_MANIFESTS } from '@ambient/shaders';
-import { binanceTrades, wikipediaEdits } from '@ambient/sources';
+import {
+  binanceTrades,
+  blueskyJetstream,
+  spaceWeather,
+  usgsEarthquakes,
+  wikipediaEdits,
+} from '@ambient/sources';
 import type { Subscription } from 'rxjs';
 
 export const OVERLAY_SOURCE = 'overlay';
@@ -39,6 +45,12 @@ export interface SourceOption {
   readonly create: () => Source;
 }
 
+/**
+ * The Bluesky source reads its watched word through this on every post, so the word can change
+ * while the feed runs. Session state only: never saved, never put in a link.
+ */
+export const blueskyWatch = { word: '' };
+
 /** The sources the overlay can toggle. All free, keyless, and browser-native. */
 export const SOURCE_OPTIONS: readonly SourceOption[] = [
   {
@@ -52,6 +64,27 @@ export const SOURCE_OPTIONS: readonly SourceOption[] = [
     name: 'BTC/USDT trades',
     description: 'Binance public trade stream. Big trades pulse, volatility drives turbulence.',
     create: () => binanceTrades({ symbol: 'btcusdt' }),
+  },
+  {
+    id: 'bluesky-jetstream',
+    name: 'Bluesky',
+    description:
+      'Public Bluesky posts, reposts and follows. Each language gathers in its own zone; emoji set the mood.',
+    create: () => blueskyJetstream({ watch: () => blueskyWatch.word }),
+  },
+  {
+    id: 'usgs-earthquakes',
+    name: 'Earthquakes (USGS)',
+    description:
+      'Earthquakes worldwide, pulsing where they happen. Shallow quakes warm the mood, deep ones cool it.',
+    create: () => usgsEarthquakes(),
+  },
+  {
+    id: 'space-weather',
+    name: 'Space weather (NOAA)',
+    description:
+      'Geomagnetic activity and the solar wind. The art grows restless when the real aurora does.',
+    create: () => spaceWeather(),
   },
   {
     id: 'mock',

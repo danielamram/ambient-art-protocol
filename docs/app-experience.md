@@ -133,6 +133,9 @@ built from existing controls (`state/presets.ts`):
 
 - Edit tide: Wikipedia edits with Resonant Silk.
 - Market ember: BTC/USDT trades with Chromatic Ink.
+- Aurora mirror: NOAA space weather with Aurora Drift.
+- Bluesky heartbeat: Bluesky with Living Filaments.
+- Seismic memory: USGS earthquakes with Resonant Silk.
 - Rehearsal: simulated signals with Living Filaments; works offline.
 
 Clicking a pairing applies its look through `applySettings()` and then selects its feed
@@ -141,6 +144,26 @@ only from that explicit click. Links and saved looks still never start a feed. A
 can't connect keeps the look and shows "Source unavailable" with Retry. Pairings are
 disabled in capture mode. Each preset's settings are unit-tested to validate unchanged
 against the scene registry.
+
+## Live feeds
+
+| Feed | Transport | Pulses | Ambiance and current |
+|---|---|---|---|
+| Wikipedia edits | SSE | Each edit, at a spot fixed per page | Add/remove balance, edit rate |
+| BTC/USDT trades | WebSocket | Large trades | Price drift and volatility |
+| Bluesky | Jetstream WebSocket | Posts (sized by length), reposts, follows; at most 4 per second. With a watched word, only matching posts, at 0.85 | Warm/cold emoji balance, activity rate; current drifts toward recent pulses |
+| Earthquakes (USGS) | JSON polled every 60 s | Each new quake at its longitude/latitude (north up), sized by magnitude; the 3 most recent replay on start | Shallow warm / deep cool; strongest quake drives turbulence and pulls the current |
+| Space weather (NOAA) | JSON polled every 60 s | A sharp rise in Kp | Kp drives turbulence; southward Bz raises the mood; solar wind speed and By/Bz steer the current |
+
+- **Bluesky:** likes are off by default because they multiply bandwidth. The watched word is
+  session state only; it is never saved or put in a link. It is matched as a whole word,
+  case-insensitively, in any script, and it can change without reconnecting.
+- **Polled feeds:** transient failures are tolerated. After five failed polls in a row the feed
+  reports "Source unavailable". Stopping aborts any request in flight.
+- **Verification status:** these three feeds were built against their documented formats and
+  are tested with documented-format fixtures, in unit tests and in a routed browser flow. Live
+  access, rate limits and CORS headers from a real browser have not been verified: the
+  development container's network policy blocked these hosts.
 
 ## Signal scope
 
