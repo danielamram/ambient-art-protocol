@@ -80,7 +80,7 @@ interface Pass {
 }
 
 // Renderer-local art state; the public signal protocol remains unchanged.
-const SCENE_UNIFORMS = [...STANDARD_UNIFORMS, 'u_gesture', 'u_stroke'] as const;
+const SCENE_UNIFORMS = [...STANDARD_UNIFORMS, 'u_gesture', 'u_stroke', 'u_activity'] as const;
 
 const POST_UNIFORMS = [
   'u_scene',
@@ -638,6 +638,7 @@ export class CanvasRenderer {
     if (loc.u_turbulence) gl.uniform1f(loc.u_turbulence, state.u_turbulence);
     if (loc.u_mood) gl.uniform1f(loc.u_mood, state.u_mood);
     if (loc.u_energy) gl.uniform1f(loc.u_energy, state.u_energy);
+    if (loc.u_activity) gl.uniform1f(loc.u_activity, state.u_activity ?? 0);
     if (loc.u_dt) gl.uniform1f(loc.u_dt, state.u_dt);
   }
 

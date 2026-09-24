@@ -11,6 +11,7 @@ ${STANDARD_UNIFORM_BLOCK}
 uniform float u_form;
 uniform vec3 u_pointer;
 uniform vec4 u_gesture;
+uniform float u_activity;
 out vec2 v_edge;
 out vec3 v_color;
 out float v_alpha;
@@ -20,8 +21,25 @@ const int STRANDS = AAP_QUALITY > 0 ? 180 : 60;
 
 mat2 rotate(float a) { return mat2(cos(a), -sin(a), sin(a), cos(a)); }
 float hash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+// A pulse's location deterministically selects an origin along the loop and strand bundle.
+// Travel follows pulse age; shader time alone can never launch a light packet.
+float eventPacket(float u, float s) {
+  float sum = 0.0;
+  for (int i = 0; i < 8; i++) {
+    vec4 pulse = u_pulses[i];
+    float origin = fract(pulse.x + pulse.y * 0.23);
+    float front = fract(origin + pulse.z * 0.32);
+    float along = abs(fract(u - front + 0.5) - 0.5);
+    float across = abs(fract(s - pulse.y + 0.5) - 0.5);
+    float width = 0.035 + pulse.z * 0.018;
+    float bundle = exp(-across * across * 35.0);
+    float fade = 1.0 - smoothstep(2.3, 3.0, pulse.z);
+    sum += sqrt(max(pulse.w, 0.0)) * exp(-along * along / (width * width)) * bundle * fade;
+  }
+  return 1.0 - exp(-sum * 1.6);
+}
 vec3 curve(float u, float s) {
-  float t = u_time * 0.13;
+  float t = u_time * 0.025;
   float a = u * TAU;
   float b = s * TAU;
   float breathe = sin(t * 0.37) * 0.5 + 0.5;
@@ -36,15 +54,17 @@ vec3 curve(float u, float s) {
 #else
   // Three continuous rhythms separate silhouette, folding, and strand motion.
   // All loops close at u=0/1; no fractional angular winding can tear the seam.
-  float opening = 0.5 + 0.5 * sin(u_time * 0.075 - 0.7);
-  float fold = 0.5 + 0.5 * sin(u_time * 0.047 + 1.2);
-  float twist = b + 3.0 * a + t * 0.45 + sin(a * 2.0 - t) * fold * 0.8;
+  float opening = 0.22 + u_activity * 0.65 + sin(t * 0.3) * 0.02;
+  float fold = 0.28 + u_activity * 0.52;
+  float packet = eventPacket(u, s);
+  float bundle = sin(b * 5.0 + a * 2.0) * u_activity * 0.12;
+  float twist = b + bundle + 3.0 * a + t * 0.15 + sin(a * 2.0 - t) * fold * 0.8;
   float tube = mix(0.24, 0.58, fold) + 0.15 * u_form;
   tube *= 0.85 + 0.15 * sin(a * 3.0 - t);
-  float radius = mix(0.98, 1.58, opening) + tube * cos(twist);
+  float radius = mix(0.98, 1.58, opening) + tube * cos(twist) + packet * 0.07;
   radius += 0.18 * fold * cos(a * 3.0 + t * 0.3);
   p = vec3(radius * cos(a), radius * sin(a), tube * sin(twist));
-  p.z += (0.20 + u_form * 0.42 + fold * 0.26) * sin(a * 2.0 + t * 0.5);
+  p.z += (0.20 + u_form * 0.42 + fold * 0.26) * sin(a * 2.0 + t * 0.5) + packet * 0.10;
   p.y *= mix(0.78, 1.08, opening);
   p.x += 0.12 * sin(a * 3.0 + t * 0.4);
   p.xy *= rotate(0.20 + sin(t * 0.29) * 0.25);
@@ -113,13 +133,13 @@ void main() {
 #if SILK == 0
   // Sparse moving highlights and dim rear strands preserve hue at overlaps.
   float front = smoothstep(-1.1, 1.2, mix(p0.z, p1.z, c.x));
-  float band = 0.5 + 0.5 * sin(s * TAU * 5.0 + u_time * 0.08);
-  float glint = flowing * pow(band, 8.0);
+  float band = 0.5 + 0.5 * sin(s * TAU * 5.0);
+  float glint = eventPacket(u, s);
   vec3 shadow = u_mood < 0.5
     ? mix(vec3(0.015,0.10,0.17), vec3(0.18,0.025,0.009), u_mood * 2.0)
     : mix(vec3(0.18,0.025,0.009), vec3(0.055,0.018,0.19), (u_mood - 0.5) * 2.0);
   v_color = mix(shadow, hue, 0.22 + front * 0.65);
-  v_color *= 0.40 + front * 0.55 + glint * 0.7 + u_energy * 0.12;
+  v_color *= 0.40 + front * 0.55 + glint * 2.2 + u_activity * 0.08;
   v_alpha = (0.045 + front * 0.19) * (0.55 + band * 0.45)
     * (AAP_QUALITY > 0 ? 1.0 : 2.3);
 #endif
@@ -154,7 +174,8 @@ const geometry = (silk: boolean): GeometryPass => ({
 export const livingFilaments: ShaderManifest = {
   id: 'living-filaments',
   name: 'Living Filaments',
-  description: 'A suspended organism woven from light. Hold to gather; release to resonate.',
+  description:
+    'Events travel as light through woven strands. Activity gathers and opens the sculpture.',
   fragment: background,
   uniforms: STANDARD_DECLARATIONS,
   geometry: geometry(false),
