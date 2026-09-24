@@ -80,7 +80,7 @@ interface Pass {
 }
 
 // Renderer-local art state; the public signal protocol remains unchanged.
-const SCENE_UNIFORMS = [...STANDARD_UNIFORMS, 'u_gesture'] as const;
+const SCENE_UNIFORMS = [...STANDARD_UNIFORMS, 'u_gesture', 'u_stroke'] as const;
 
 const POST_UNIFORMS = [
   'u_scene',
@@ -130,6 +130,8 @@ export class CanvasRenderer {
   #geometry: Pass | undefined;
   #form = 0.45;
   #gesture = new GestureMemory();
+  #stroke = new Float32Array([0.5, 0.5, 0.5, 0.5]);
+  #previousPointer: readonly [number, number] | undefined;
   #pointer: readonly [number, number, number] = [0.5, 0.5, 0];
   #display: RenderTarget | undefined;
   #outgoing: RenderTarget | undefined;
@@ -224,7 +226,10 @@ export class CanvasRenderer {
     this.#geometry = geometry;
     this.#program = program;
     this.#manifest = manifest;
-    if (!preserveHistory) this.#gesture.reset();
+    if (!preserveHistory) {
+      this.#gesture.reset();
+      this.#previousPointer = undefined;
+    }
     gl.useProgram(program);
     this.#loc = this.#locations(program, SCENE_UNIFORMS);
     const prev = this.#loc.u_prevFrame;
@@ -302,6 +307,11 @@ export class CanvasRenderer {
     const bloom = this.#bloom;
     if (!scene || !bloom) return;
     this.#gesture.advance(this.#pointer, state.u_dt);
+    const [x, y, strength] = this.#pointer;
+    const start = this.#previousPointer;
+    this.#stroke.set([start?.[0] ?? x, start?.[1] ?? y, x, y]);
+    // Consume paused samples too: resuming must not paint a stroke across the pause.
+    this.#previousPointer = strength > 0.02 ? [x, y] : undefined;
     const passes = planPasses(this.#settings);
     gl.bindVertexArray(this.#vao);
     for (const pass of passes) this.#draw(pass, state, scene, bloom);
@@ -617,6 +627,7 @@ export class CanvasRenderer {
     if (loc.u_form) gl.uniform1f(loc.u_form, this.#form);
     if (loc.u_pointer) gl.uniform3f(loc.u_pointer, ...this.#pointer);
     if (loc.u_gesture) gl.uniform4fv(loc.u_gesture, this.#gesture.uniform);
+    if (loc.u_stroke) gl.uniform4fv(loc.u_stroke, this.#stroke);
     if (loc.u_time) gl.uniform1f(loc.u_time, state.u_time);
     if (loc.u_resolution) gl.uniform2f(loc.u_resolution, width, height);
     if (loc.u_pulse) gl.uniform1f(loc.u_pulse, state.u_pulse);
