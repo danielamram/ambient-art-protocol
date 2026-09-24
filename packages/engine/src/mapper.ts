@@ -2,6 +2,7 @@ import type { DataSignalBus } from '@ambient/sdk';
 import type { Subscription } from 'rxjs';
 import { expDamp } from './damp.js';
 import { addEnergy, decayEnergy } from './energy.js';
+import { EventActivity } from './event-activity.js';
 import { PulseBuffer, type PulseBufferOptions } from './pulse-buffer.js';
 
 /** The values a shader reads each frame. Every scalar is in [0, 1] except u_time. */
@@ -20,6 +21,8 @@ export interface UniformState {
   u_mood: number;
   /** Activity envelope, 0..1. Rises with every pulse, decays with `energyTau`. */
   u_energy: number;
+  /** Smoothed long-lived pulse activity. Optional for older renderer callers. */
+  u_activity?: number;
   /** Seconds advanced by the last `tick`. Feedback shaders scale their decay by it. */
   u_dt: number;
 }
@@ -62,6 +65,7 @@ export class SignalToUniformMapper {
   readonly energyTau: number;
   readonly energyGain: number;
 
+  #activity = new EventActivity();
   #energy = 0;
   #dt = 0;
   #target = { mood: 0.5, turbulence: 0.2, current: [0.5, 0.5, 0] as [number, number, number] };
@@ -99,8 +103,7 @@ export class SignalToUniformMapper {
         .subscribe((a) => this.setTarget({ mood: a.moodScore, turbulence: a.turbulence })),
       bus.on('current').subscribe((c) => this.setTarget({ current: [c.x, c.y, c.velocity] })),
       bus.on('pulse').subscribe((p) => {
-        this.pulses.push(p);
-        this.#energy = addEnergy(this.#energy, p.magnitude, this.energyGain);
+        this.pushPulse(p);
       }),
     ];
     return this;
@@ -141,6 +144,7 @@ export class SignalToUniformMapper {
     const step = Number.isFinite(dt) && dt > 0 ? dt : 0;
     this.#time += step;
     this.#dt = step;
+    this.#activity.tick(step);
     this.#energy = decayEnergy(this.#energy, step, this.energyTau);
     const c = this.#current;
     const t = this.#target;
@@ -165,6 +169,7 @@ export class SignalToUniformMapper {
       u_turbulence: this.#current.turbulence,
       u_mood: this.#current.mood,
       u_energy: this.#energy,
+      u_activity: this.#activity.value,
       u_dt: this.#dt,
     };
   }
@@ -185,12 +190,14 @@ export class SignalToUniformMapper {
   /** Push a pulse straight into the buffer and energy envelope, bypassing the bus. */
   pushPulse(pulse: Parameters<PulseBuffer['push']>[0]): void {
     this.pulses.push(pulse);
+    this.#activity.push(pulse.magnitude);
     this.#energy = addEnergy(this.#energy, pulse.magnitude, this.energyGain);
   }
 
   dispose(): void {
     this.detach();
     this.pulses.clear();
+    this.#activity.clear();
     this.#energy = 0;
   }
 }
