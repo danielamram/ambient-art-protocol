@@ -770,3 +770,44 @@ summary {
   color: #a9c2b6;
   font-variant-numeric: tabular-nums;
 }
+.presets {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.presets legend {
+  font-size: 10px;
+  color: #9bb0a8;
+  margin-bottom: 8px;
+}
+.preset-list {
+  display: grid;
+  gap: 6px;
+}
+.preset {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 9px 11px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff04;
+}
+.preset:hover {
+  border-color: #bcebd855;
+}
+.preset:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.preset-name {
+  font-size: 11px;
+  color: #d9e9e0;
+}
+.preset-note {
+  font-size: 9px;
+  color: #6f8a7d;
+}
